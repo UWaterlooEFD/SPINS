@@ -46,6 +46,9 @@ bool do_enstrophy;                  // Do Enstrophy calculation?
 bool do_dissipation;                // Do Viscous dissipation?
 bool do_vort_stretch;               // Do vortex stretching/tilting?
 bool do_enst_stretch;               // Do enstrophy production term from vortex streching/tilting?
+bool do_Q;                          // Do second invariant of grad(u,v,w)?
+bool do_R;                          // Do third invariant/det of grad(u,v,w)?
+bool do_Q_and_R;                    // Do the second and third invariants?
 bool v_exist;                       // Does the v field exist?
 
 /* ------------------ Adjust the class --------------------- */
@@ -78,7 +81,7 @@ class userControl : public BaseCase {
         /* Set other things */
         double get_visco() const { return visco; }
         int get_restart_sequence() const { return plotnum; }
-
+            
         /* Read grid (if mapped) */
         bool is_mapped() const { return mapped; }
         void do_mapping(DTArray & xg, DTArray & yg, DTArray & zg) {
@@ -107,13 +110,13 @@ class userControl : public BaseCase {
             //string prev_deriv, base_field;
             vector<string> fields;      // vector of fields to take derivatives
             split(deriv_filenames.c_str(), ' ', fields);    // populate that vector
-            if ( do_vort_stretch or do_enst_stretch ) {
+            if ( do_vort_stretch or do_enst_stretch or do_Q or do_R or do_Q_and_R ) { 
                 temp1 = alloc_array(Nx,Ny,Nz);
                 temp2 = alloc_array(Nx,Ny,Nz);
-                if ( do_enst_stretch )
+                if ( do_enst_stretch )               
                     temp3 = alloc_array(Nx,Ny,Nz);
             }
-
+            
             // Compute derivatives at each requested output
             for ( plotnum = start_sequence; plotnum <= final_sequence;
                     plotnum = plotnum + step_sequence ) {
@@ -204,9 +207,11 @@ class userControl : public BaseCase {
                     }
                 }
 
-                // read in fields (if not already stored in memory)
+                // read in fields (if not already stored in memory) Nico: Should do_Q go here?
                 if ( do_vor_x or do_vor_y or do_vor_z or
-                        do_enstrophy or do_dissipation or do_vort_stretch or do_enst_stretch ) {
+                        do_enstrophy or do_dissipation or 
+                        do_vort_stretch or do_enst_stretch or 
+                        do_Q or do_R or do_Q_and_R ) {
                     // u
                     init_tracer_restart("u",u);
                     // v
@@ -315,6 +320,24 @@ class userControl : public BaseCase {
                     if (master())
                         fprintf(stdout,"Completed the write for enst-stretch.%d\n",plotnum);
                 }
+
+                // Calculate Q/second invariant of grad(u,v,w)
+                if ( do_Q or do_Q_and_R ) {
+                    Q_invt(deriv_var, u, v, w, *temp1, *temp2, gradient_op, grid_type);
+                    double max_var = psmax(max(abs(deriv_var)));
+                    if (master()) fprintf(stdout,"Max Q: %.6g\n",max_var);
+                    write_array(deriv_var,"Q",plotnum);
+                    if (master()) fprintf(stdout,"Completed the write for Q.%d\n",plotnum);
+                }
+                
+                // Calculate R/third invariant of grad(u,v,w)
+                if ( do_R or do_Q_and_R ) {
+                    R_invt(deriv_var, u, v, w, *temp1, *temp2, gradient_op, grid_type, v_exist);
+                    double max_var = psmax(max(abs(deriv_var)));
+                    if (master()) fprintf(stdout,"Max R: %.6g\n",max_var);
+                    write_array(deriv_var,"R",plotnum);
+                    if (master()) fprintf(stdout,"Completed the write for R.%d\n",plotnum);
+                }
             }
         }
 
@@ -380,8 +403,10 @@ int main(int argc, char ** argv) {
     add_option("do_dissipation",&do_dissipation,false,"Calculate viscous dissipation?");
     add_option("do_vort_stretch",&do_vort_stretch,false,"Calculate vortex stretching?");
     add_option("do_enst_stretch",&do_enst_stretch,false,"Calculate enstrophy stretching production?");
+    add_option("do_Q",&do_Q,false,"Calculate Q?");
+    add_option("do_R",&do_R,false,"Calculate R?");
+    add_option("do_Q_and_R",&do_Q_and_R,false,"Calculate Q and R?");
     add_option("v_exist",&v_exist,"Does the v field exist?");
-
     // Parse the options from the command line and config file
     options_parse(argc,argv);
 
