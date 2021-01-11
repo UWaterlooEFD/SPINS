@@ -110,6 +110,18 @@ void enstrophy_stretch_production(TArrayn::DTArray & enst_prod, TArrayn::DTArray
         TArrayn::DTArray & temp2, TArrayn::DTArray & temp3, TArrayn::Grad * gradient_op,
         const string * grid_type);
 
+// Q/Second invariant of grad(u,v,w)
+void Q_invt(TArrayn::DTArray & Q, TArrayn::DTArray & u,
+         TArrayn::DTArray & v, TArrayn::DTArray & w, TArrayn::DTArray & temp1,
+         TArrayn::DTArray & temp2, TArrayn::Grad * gradient_op,
+         const string * grid_type);
+
+// R/Third invariant of grad(u,v,w)
+void R_invt(TArrayn::DTArray & R, TArrayn::DTArray & u,
+         TArrayn::DTArray & v, TArrayn::DTArray & w, TArrayn::DTArray & temp1,
+         TArrayn::DTArray & temp2, TArrayn::Grad * gradient_op,
+         const string * grid_type, bool v_exist);
+
 // Equation of state for seawater, polynomial fit from
 // Brydon, Sun, Bleck (1999) (JGR)
 
