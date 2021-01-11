@@ -35,6 +35,14 @@ void compute_vorticity(TArrayn::DTArray & vortx, TArrayn::DTArray & vorty, TArra
         TArrayn::DTArray & u, TArrayn::DTArray & v, TArrayn::DTArray & w,
         TArrayn::Grad * gradient_op, const string * grid_type);
 
+// Baroclinic Vorticity
+void compute_baroclinic_vort_x(TArrayn::DTArray & barovortx, TArrayn::DTArray & T,
+        TArrayn::Grad * gradient_op, const string * grid_type);
+void compute_baroclinic_vort_y(TArrayn::DTArray & barovorty, TArrayn::DTArray & T,
+        TArrayn::Grad * gradient_op, const string * grid_type);
+void compute_baroclinic_vort(TArrayn::DTArray & barovort, TArrayn::DTArray & temp, 
+        TArrayn::DTArray & T, TArrayn::Grad * gradient_op, const string * grid_type, bool v_exist);
+
 // Enstrophy density
 void enstrophy_density(TArrayn::DTArray & enst, TArrayn::DTArray & u, TArrayn::DTArray & v,
         TArrayn::DTArray & w, TArrayn::Grad * gradient_op, const string * grid_type,
@@ -133,6 +141,49 @@ inline double eqn_of_state(double T, double S){
 
 // Define a Blitz-friendly operator
 BZ_DECLARE_FUNCTION2(eqn_of_state)
+
+// Derivative of the equation of state WRT T
+
+inline double eqn_of_state_dT(double T){
+   // Returbs the derivative of the eqn_of_state function above WRT T
+   // temperature T (degrees celsius), S assumed to be zero
+
+   // Constants are from table 4 of the above paper, at pressure 0
+   // (This is appropriate since this is currently an incompressible
+   // model)
+   
+   // Kept the same names for these constants as in eqn_of_state
+   const double c2 =  5.10768e-2; // T term, constant after derivative
+   const double c4 = -7.40849e-3; // T^2 term, 2T after derivative
+   const double c5 = -3.01036e-3; // ST term, S after derivative
+   const double c6 =  3.32267e-5; // T^3 term, 3t^2 after derivative
+   const double c7 =  3.21931e-5; // ST^2 term, 2ST after derivative
+
+   return c2 + 2*c4*T + 3*c6*T*T;
+}
+
+// Define a Blitz-friendly operator
+ BZ_DECLARE_FUNCTION(eqn_of_state_dT)
+
+// Derivative of the equation of state WRT S
+
+inline double eqn_of_state_dS(double T, double S){
+   // Returns the density anomaly (kg/m^3) for water at the given
+   // temperature T (degrees celsius) and salinity S (PSU?)
+
+   // Constants are from table 4 of the above paper, at pressure 0
+   // (This is appropriate since this is currently an incompressible
+   // model)
+   const double c3 =  8.05999e-1; // S term, constant after derivative
+   const double c5 = -3.01036e-3; // ST term, T after derivative
+   const double c7 =  3.21931e-5; // ST^2 term, T^2 after derivative
+
+   return  c3 + c5*T + c7*T*T;
+}
+
+// Define a Blitz-friendly operator
+BZ_DECLARE_FUNCTION2(eqn_of_state_dS)
+
 
 inline double eqn_of_state_t(double T){
    // Specialize for freshwater with S=0

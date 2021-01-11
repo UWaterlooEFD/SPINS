@@ -32,6 +32,8 @@ const int z_ind = 2;
 // physical parameters
 double visco;                       // viscosity (m^2/s)
 double rho_0;                       // reference density (kg/m^3)
+double g;                           // acceleration due to gravity (m/s^2)
+
 // current output number
 int plotnum;
 
@@ -42,6 +44,7 @@ int final_sequence;                 // output number to stop  taking derivatives
 int step_sequence;                  // step between outputs to take derivatives
 bool deriv_x, deriv_y, deriv_z;     // which derivatives
 bool do_vor_x, do_vor_y, do_vor_z;  // Do vorticity calculations?
+bool do_barvor;                     // Do baroclinic vorticity?
 bool do_enstrophy;                  // Do Enstrophy calculation?
 bool do_dissipation;                // Do Viscous dissipation?
 bool do_vort_stretch;               // Do vortex stretching/tilting?
@@ -56,6 +59,7 @@ class userControl : public BaseCase {
         Grad * gradient_op;     // gradient operator
         DTArray deriv_var;      // array for derivative
         DTArray *temp1, *temp2, *temp3;   // arrays for vortex stretching / enstrophy production
+        DTArray *temp4; // array for storing temporary array for baroclinic vorticity
 
         /* Size of domain */
         double length_x() const { return Lx; }
@@ -112,6 +116,10 @@ class userControl : public BaseCase {
                 temp2 = alloc_array(Nx,Ny,Nz);
                 if ( do_enst_stretch )
                     temp3 = alloc_array(Nx,Ny,Nz);
+            }
+            
+            if ( do_barvor ) {
+                temp4 = alloc_array(Nx,Ny,Nz);
             }
 
             // Compute derivatives at each requested output
@@ -203,9 +211,36 @@ class userControl : public BaseCase {
                         }
                     }
                 }
+                
+                // Baroclinic vorticity
+
+                if ( do_barvor ) {
+                    // Store Temperature in T, it is free
+                    init_tracer_restart("t",u);
+                    compute_baroclinic_vort(deriv_var, *temp4, u, gradient_op, grid_type, v_exist);
+                    deriv_var=deriv_var*g;
+                    write_array(deriv_var,"bar",plotnum);
+                    if (master()) fprintf(stdout,"Completed the write for bar.%d\n",plotnum);
+
+                    if ( v_exist ) {
+                       compute_baroclinic_vort_x(deriv_var, u, gradient_op, grid_type);
+                       deriv_var=deriv_var*g;
+                       write_array(deriv_var,"barx",plotnum);
+                       if (master()) fprintf(stdout,"Completed the write for barx.%d\n",plotnum); 
+                    }
+
+                    compute_baroclinic_vort_y(deriv_var, u, gradient_op, grid_type);
+                    deriv_var=deriv_var*g;
+                    write_array(deriv_var,"bary",plotnum);
+                    if (master()) fprintf(stdout,"Completed the write for bary.%d\n",plotnum);
+                     
+                    // Restart u
+                    u = 0;
+                }
 
                 // read in fields (if not already stored in memory)
-                if ( do_vor_x or do_vor_y or do_vor_z or
+                
+                if ( do_vor_x or do_vor_y or do_vor_z or 
                         do_enstrophy or do_dissipation or do_vort_stretch or do_enst_stretch ) {
                     // u
                     init_tracer_restart("u",u);
@@ -250,7 +285,7 @@ class userControl : public BaseCase {
                     write_array(deriv_var,"vortz",plotnum);
                     if (master())
                         fprintf(stdout,"Completed the write for vortz.%d\n",plotnum);
-                }
+                }                    
 
                 // Calculate Enstrophy
                 if ( do_enstrophy ) {
@@ -364,6 +399,8 @@ int main(int argc, char ** argv) {
     option_category("Physical parameters");
     add_option("visco",&visco,0.0,"Viscosity");
     add_option("rho_0",&rho_0,1000.0,"Reference Density");
+    add_option("g",&g,9.81,"Acceleration due to gravity");
+
 
     option_category("Derivative options");
     add_option("deriv_files",&deriv_filenames,"Derivative filename");
@@ -376,6 +413,7 @@ int main(int argc, char ** argv) {
     add_option("do_vor_x",&do_vor_x,false,"Do the X-component of vorticity?");
     add_option("do_vor_y",&do_vor_y,false,"Do the Y-component of vorticity?");
     add_option("do_vor_z",&do_vor_z,false,"Do the Z-component of vorticity?");
+    add_option("do_barvor",&do_barvor,false,"Do the baroclinic vorticity?");
     add_option("do_enstrophy",&do_enstrophy,false,"Calculate enstrophy?");
     add_option("do_dissipation",&do_dissipation,false,"Calculate viscous dissipation?");
     add_option("do_vort_stretch",&do_vort_stretch,false,"Calculate vortex stretching?");
