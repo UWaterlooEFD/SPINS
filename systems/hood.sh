@@ -28,9 +28,9 @@ EXTRA_OPTIM_LDFLAGS=$EXTRA_OPTIM_CFLAGS
 # alias
 MPICXX=icpc
 MPI_CFLAGS=
-MPI_LIBDIR="-L${MPI_LIB}"
+MPI_LIBDIR="-L${MPI_LIB?MPI_LIB unset}"
 MPI_LIB="-lmpi"
-MPI_INCDIR="-I${MPI_INCLUDE}"
+MPI_INCDIR="-I${MPI_INCLUDE?MPI_INCLUDE unset}"
 
 # Library names/locations for LAPACK
 LAPACK_LIB="-lmkl_intel_lp64 -lmkl_core -lmkl_sequential -lpthread"
