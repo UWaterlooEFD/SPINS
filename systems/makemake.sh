@@ -83,3 +83,18 @@ BLAS_INCDIR:=$BLAS_INCDIR
 EOF
 
 
+echo "Sanity check - building trivial MPI executable"
+rm -f mpitest.o mpitest.x mpitest.cpp
+cat > mpitest.cpp << EOF
+#include <mpi.h>
+int main(int argc, char ** argv) {
+   MPI_Init(&argc, &argv);
+   MPI_Finalize();
+   return 0;
+}
+EOF
+echo "Executing: $MPICXX $SYSTEM_CFLAGS $SYSTEM_CXXFLAGS $MPI_CFLAGS $MPI_INCDIR -c -o mpitest.o ./mpitest.cpp"
+$MPICXX $SYSTEM_CFLAGS $SYSTEM_CXXFLAGS $MPI_CFLAGS $MPI_INCDIR -c -o mpitest.o ./mpitest.cpp || echo "WARNING: MPI compilation failed!" && echo "MPI compilation success"
+echo "Executing: $LD $SYSTEM_LDFLAGS $MPI_LIBDIR -o mpitest.x mpitest.o $MPI_LIB -lstdc++" 
+$LD $SYSTEM_LDFLAGS $MPI_LIBDIR -o mpitest.x mpitest.o $MPI_LIB -lstdc++ || echo "WARNING: MPI linking failed!" && echo "MPI linking success"
+rm -f mpitest.o mpitest.x mpitest.cpp
