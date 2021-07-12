@@ -244,7 +244,7 @@ class userControl : public BaseCase {
                 vector<DTArray *> & tracers, vector<DTArray *> & tracers_f) {
             u_f = +rot_f*v;
             v_f = -rot_f*u;
-            w_f = -g*(nleos(*tracers[TEMP],*tracers[SALT]) - rho_0)/rho_0;
+            w_f = -g*(eqn_of_state(*tracers[TEMP],*tracers[SALT]))/rho_0;
             *tracers_f[TEMP] = 0;
             *tracers_f[SALT] = 0;
         }
