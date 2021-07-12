@@ -244,7 +244,13 @@ class userControl : public BaseCase {
                 vector<DTArray *> & tracers, vector<DTArray *> & tracers_f) {
             u_f = +rot_f*v;
             v_f = -rot_f*u;
-            w_f = -g*(nleos(*tracers[TEMP],*tracers[SALT]) - rho_0)/rho_0;
+
+            //Do Eos stuff 
+            quadeos(*temp1,*tracers[TEMP]);
+            //The line below is patchwork, but is enough for a test case
+            rho_0 = compute_rho0(3.98,0);
+            
+            w_f = -g/rho_0*(*temp1-rho_0);
             *tracers_f[TEMP] = 0;
             *tracers_f[SALT] = 0;
         }
