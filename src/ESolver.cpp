@@ -1,6 +1,5 @@
 #include "TArray.hpp"
 #include "blitz/array.h"
-#include "blitz/tinyvec-et.h"
 #include "ESolver.hpp"
 #include "gmres_1d_solver.hpp"
 #include "gmres_2d_solver.hpp"
