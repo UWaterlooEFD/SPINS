@@ -183,8 +183,6 @@ inline double nleos_inline(double T, double S){
 }
 BZ_DECLARE_FUNCTION2(nleos_inline)
 
-
-
 void nleos(TArrayn::DTArray & rho, TArrayn::DTArray & T,
          TArrayn::DTArray & S);
 
@@ -229,8 +227,6 @@ void quadeos(TArrayn::DTArray & rho, TArrayn::DTArray & T);
 
 void eos(const string eos_type, TArrayn::DTArray & rho, TArrayn::DTArray & T, TArrayn::DTArray & S, double T0 = -10, double S0 = -2);
 
-
-
 /*
 inline double fresh_quad(double T){
    // Returns the density (kg/m^3) for water using simple quadratic fit to 
@@ -246,6 +242,13 @@ inline double fresh_quad(double T){
 BZ_DECLARE_FUNCTION(fresh_quad)
 */
 
+// lambda2, second eigenvalue of S^2+Omega^2
+void compute_lambda2(TArrayn::DTArray & lambda2, TArrayn::DTArray & u,
+    TArrayn::DTArray & v, TArrayn::DTArray & w, TArrayn::DTArray & temp1,
+    TArrayn::DTArray & temp2, TArrayn::Grad * gradient_op,
+    const string * grid_type, TArrayn::DTArray & A11, TArrayn::DTArray & A12,
+    TArrayn::DTArray & A13, TArrayn::DTArray & A22, TArrayn::DTArray & A23,
+    TArrayn::DTArray & A33); 
 
 // Equation of state for seawater, polynomial fit from
 // Brydon, Sun, Bleck (1999) (JGR)

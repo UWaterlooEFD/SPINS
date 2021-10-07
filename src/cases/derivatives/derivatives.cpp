@@ -52,6 +52,7 @@ bool do_enst_stretch;               // Do enstrophy production term from vortex 
 bool do_Q;                          // Do second invariant of grad(u,v,w)?
 bool do_R;                          // Do third invariant/det of grad(u,v,w)?
 bool do_Q_and_R;                    // Do the second and third invariants?
+bool do_lambda2;                     // Do lambda2/Hussain's Lambda?
 bool v_exist;                       // Does the v field exist?
 
 /* ------------------ Adjust the class --------------------- */
@@ -63,6 +64,7 @@ class userControl : public BaseCase {
         DTArray deriv_var;      // array for derivative
         DTArray *temp1, *temp2, *temp3;   // arrays for vortex stretching / enstrophy production
         DTArray *temp4; // array for storing temporary array for baroclinic vorticity
+        DTArray *A11, *A12, *A13, *A22, *A23, *A33; //Arrays for components of S^2+Omega^2
 
         /* Size of domain */
         double length_x() const { return Lx; }
@@ -114,7 +116,7 @@ class userControl : public BaseCase {
             //string prev_deriv, base_field;
             vector<string> fields;      // vector of fields to take derivatives
             split(deriv_filenames.c_str(), ' ', fields);    // populate that vector
-            if ( do_vort_stretch or do_enst_stretch or do_Q or do_R or do_Q_and_R ) { 
+            if ( do_vort_stretch or do_enst_stretch or do_Q or do_R or do_Q_and_R or do_lambda2 ) { 
                 temp1 = alloc_array(Nx,Ny,Nz);
                 temp2 = alloc_array(Nx,Ny,Nz);
                 if ( do_enst_stretch )               
@@ -125,6 +127,14 @@ class userControl : public BaseCase {
                 temp4 = alloc_array(Nx,Ny,Nz);
             }
 
+            if ( do_lambda2 ) {
+               A11 = alloc_array(Nx,Ny,Nz); 
+               A12 = alloc_array(Nx,Ny,Nz); 
+               A13 = alloc_array(Nx,Ny,Nz); 
+               A22 = alloc_array(Nx,Ny,Nz); 
+               A23 = alloc_array(Nx,Ny,Nz); 
+               A33 = alloc_array(Nx,Ny,Nz); 
+            }
             // Compute derivatives at each requested output
             for ( plotnum = start_sequence; plotnum <= final_sequence;
                     plotnum = plotnum + step_sequence ) {
@@ -231,7 +241,7 @@ class userControl : public BaseCase {
                        write_array(deriv_var,"barx",plotnum);
                        if (master()) fprintf(stdout,"Completed the write for barx.%d\n",plotnum); 
                     }
-
+                    
                     compute_baroclinic_vort_y(deriv_var, u, gradient_op, grid_type);
                     deriv_var=deriv_var*g;
                     write_array(deriv_var,"bary",plotnum);
@@ -245,7 +255,7 @@ class userControl : public BaseCase {
                 if ( do_vor_x or do_vor_y or do_vor_z or
                         do_enstrophy or do_dissipation or 
                         do_vort_stretch or do_enst_stretch or 
-                        do_Q or do_R or do_Q_and_R ) {
+                        do_Q or do_R or do_Q_and_R or do_lambda2 ) {
                     // u
                     init_tracer_restart("u",u);
                     // v
@@ -372,6 +382,17 @@ class userControl : public BaseCase {
                     write_array(deriv_var,"R",plotnum);
                     if (master()) fprintf(stdout,"Completed the write for R.%d\n",plotnum);
                 }
+
+                // Calculate lambda2/second eigenvalue of S^2+Omega^2
+                if ( do_lambda2 ){
+                    compute_lambda2( deriv_var, u, v, w, *temp1, *temp2, gradient_op, 
+                            grid_type, *A11, *A12, *A13, *A22, *A23, *A33);
+                    double max_var = psmax(max(abs(deriv_var)));
+                    if (master()) fprintf(stdout,"Max lam2: %.6g\n",max_var);
+                    write_array(deriv_var,"lam2",plotnum);
+                    if (master()) fprintf(stdout,"Completed the write for lam2.%d\n",plotnum);
+                
+                }
             }
         }
 
@@ -419,7 +440,7 @@ int main(int argc, char ** argv) {
     add_option("type_z",&zgrid_type,"Grid type in Z");
 
     option_category("Physical parameters");
-    add_option("visco",&visco,0.0,"Viscosity");
+    add_option("visco",&visco,1.0,"Viscosity");
     add_option("rho_0",&rho_0,1000.0,"Reference Density");
     add_option("g",&g,9.81,"Acceleration due to gravity");
 
@@ -443,6 +464,7 @@ int main(int argc, char ** argv) {
     add_option("do_Q",&do_Q,false,"Calculate Q?");
     add_option("do_R",&do_R,false,"Calculate R?");
     add_option("do_Q_and_R",&do_Q_and_R,false,"Calculate Q and R?");
+    add_option("do_lambda2",&do_lambda2,false,"Calculate Lambda2?");
     add_option("v_exist",&v_exist,"Does the v field exist?");
     // Parse the options from the command line and config file
     options_parse(argc,argv);
@@ -464,6 +486,17 @@ int main(int argc, char ** argv) {
         if (master())
             fprintf(stdout,"Simulation is 2 dimensional, "
                     "Ly has been changed to 1.0 for normalization.\n");
+    }
+    if (visco==1.0){
+        if (master())
+            fprintf(stdout,"You may have forgotten to specify viscosity, " 
+                    "Using default value visco = 1.\n");
+    }
+
+    if (rho_0==1000.0){
+        if (master())
+            fprintf(stdout,"You may have forgotten to specify reference density, " 
+                    "Using default value rho_0 = 1000.\n");
     }
 
     /* ------------------ Do stuff --------------------- */
