@@ -13,12 +13,12 @@
 extern Array<double,1> _quadw_x, _quadw_y, _quadw_z;
 
 // Marek's Overturning Diagnostic
-blitz::Array<double,3> overturning_2d(blitz::Array<double,3> const & rho, 
+blitz::Array<double,3> overturning_2d(blitz::Array<double,3> const & rho,
       blitz::Array<double,1> const & zgrid, TArrayn::Dimension reduce = TArrayn::thirdDim );
 
 // Read in a 2D file and interpret it as a 2D slice of a 3D array, for
 // initialization with read-in-data from a program like MATLAB
-void read_2d_slice(blitz::Array<double,3> & fillme, const char * filename, 
+void read_2d_slice(blitz::Array<double,3> & fillme, const char * filename,
                   int Nx, int Ny);
 
 void read_2d_restart(blitz::Array<double,3>& fillme, const char* filename,
@@ -40,7 +40,7 @@ void compute_baroclinic_vort_x(TArrayn::DTArray & barovortx, TArrayn::DTArray & 
         TArrayn::Grad * gradient_op, const string * grid_type);
 void compute_baroclinic_vort_y(TArrayn::DTArray & barovorty, TArrayn::DTArray & T,
         TArrayn::Grad * gradient_op, const string * grid_type);
-void compute_baroclinic_vort(TArrayn::DTArray & barovort, TArrayn::DTArray & temp, 
+void compute_baroclinic_vort(TArrayn::DTArray & barovort, TArrayn::DTArray & temp,
         TArrayn::DTArray & T, TArrayn::Grad * gradient_op, const string * grid_type, bool v_exist);
 
 // Enstrophy density
@@ -63,7 +63,7 @@ void compute_BPE_from_internal(double & phi_i, TArrayn::DTArray & rho,
         double kappa_rho, double rho_0, double g, int Nz, bool dimensional_rho = false);
 
 // Quadrature weights
-void compute_quadweights(int szx, int szy, int szz, 
+void compute_quadweights(int szx, int szy, int szz,
       double Lx, double Ly, double Lz,
       NSIntegrator::DIMTYPE DIM_X, NSIntegrator::DIMTYPE DIM_Y,
       NSIntegrator::DIMTYPE DIM_Z);
@@ -132,20 +132,20 @@ void R_invt(TArrayn::DTArray & R, TArrayn::DTArray & u,
 
 
 inline double nleos_inline(double T, double S){
-   // Returns the density (kg/m^3) 
+   // Returns the density (kg/m^3)
    // MacDougall et. al. 2003  (JAOT 20)
    //
    // This EOS is a rational function taken at pressure = 0
    //
    // Constants for Numerator
-   
+
     // First find any regions of negative salinity and set them to zero for this operation.
-    
-    if (S < 0) { 
+
+    if (S < 0) {
         S = 0;
     };
 
-    const double N0 = 9.99843699e+02; 
+    const double N0 = 9.99843699e+02;
     const double N1 = 7.35212840e+00;
     const double N2 = -5.45928211e-02;
     const double N3 = 3.98476704e-04;
@@ -162,7 +162,7 @@ inline double nleos_inline(double T, double S){
 
     double numerator = N0 + T*(N1 + T*(N2 + N3*T)) + S*(N4 + N5*T + N6*S) + p*(N7 + N8*T*T + N9*S + p*(N10 + N11*T*T));
 
-    // Constants for denominator 
+    // Constants for denominator
     const double D0 = 1.00000000e+00;
     const double D1 = 7.28606739e-03;
     const double D2 = -4.60835542e-05;
@@ -176,7 +176,7 @@ inline double nleos_inline(double T, double S){
     const double D10 = 5.30848875e-06;
     const double D11 = -3.03175128e-16;
     const double D12 = -1.27934137e-17;
-    
+
     double denominator = D0 + T*(D1 + T*(D2 + T*(D3 + D4*T))) + S*(D5 + T*(D6 + D7*T*T) + sqrt(S)*(D8 + D9*T*T)) + p*(D10 + p*T*(D11*T*T + D12*p));
 
    return numerator/denominator;
@@ -187,12 +187,12 @@ void nleos(TArrayn::DTArray & rho, TArrayn::DTArray & T,
          TArrayn::DTArray & S);
 
 inline double compute_alpha(double T0, double S0){
-    // Computes the thermal expansion coefficient at S0 and T0 
+    // Computes the thermal expansion coefficient at S0 and T0
     // Derivative is a finite difference for simplicity
     // Does not divide by rho_0, that is done in lineos()
     const double dT = 1e-08;
     double TpdT = T0 + dT;
-  
+
     double alpha = (nleos_inline(TpdT,S0) - nleos_inline(T0,S0))/dT;
 
     return alpha;
@@ -200,7 +200,7 @@ inline double compute_alpha(double T0, double S0){
 BZ_DECLARE_FUNCTION(compute_alpha)
 
 inline double compute_beta(double T0, double S0){
-    // Computes the haline contraction coefficient at S0 and T0 
+    // Computes the haline contraction coefficient at S0 and T0
     // Derivative is a finite difference for simplicity
     // Does not divide by rho_0, that is done in lineos()
     const double dS = 1e-08;
@@ -211,9 +211,9 @@ inline double compute_beta(double T0, double S0){
     return beta;
 }
 BZ_DECLARE_FUNCTION(compute_beta)
- 
+
 inline double compute_rho0(double T0, double S0){
-    // Computes the reference density at S0 and T0 
+    // Computes the reference density at S0 and T0
     double rho_0 = nleos_inline(T0,S0);
 
     return rho_0;
@@ -229,7 +229,7 @@ void eos(const string eos_type, TArrayn::DTArray & rho, TArrayn::DTArray & T, TA
 
 /*
 inline double fresh_quad(double T){
-   // Returns the density (kg/m^3) for water using simple quadratic fit to 
+   // Returns the density (kg/m^3) for water using simple quadratic fit to
    // MacDougall et. al. 2003  (JAOT 20)
    // Constants are determined via a quadratic fit preserving the Temperature of maximum density
    const double rho_max = 9.999744074665388e+02; // Density of freshwater at Tmd (deg C)
@@ -248,7 +248,17 @@ void compute_lambda2(TArrayn::DTArray & lambda2, TArrayn::DTArray & u,
     TArrayn::DTArray & temp2, TArrayn::Grad * gradient_op,
     const string * grid_type, TArrayn::DTArray & A11, TArrayn::DTArray & A12,
     TArrayn::DTArray & A13, TArrayn::DTArray & A22, TArrayn::DTArray & A23,
-    TArrayn::DTArray & A33); 
+    TArrayn::DTArray & A33);
+
+/*  Creates and outputs data for plotting a bivariate histogram with NS*NT bins
+ *  between tracers S1 and T1 to "filename.csv" (don't include file extension).
+ */
+void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
+              const TArrayn::DTArray &v, const TArrayn::DTArray &w,
+              const char T1_name, const char S1_name, const int NS,
+              const int NT, double T1_max, double S1_max, double T1_min,
+              double S1_min, const int Nx, const int Ny, const int Nz,
+              string filename, const int plotnum);
 
 // Equation of state for seawater, polynomial fit from
 // Brydon, Sun, Bleck (1999) (JGR)
@@ -283,7 +293,7 @@ inline double eqn_of_state_dT(double T){
    // Constants are from table 4 of the above paper, at pressure 0
    // (This is appropriate since this is currently an incompressible
    // model)
-   
+
    // Kept the same names for these constants as in eqn_of_state
    const double c2 =  5.10768e-2; // T term, constant after derivative
    const double c4 = -7.40849e-3; // T^2 term, 2T after derivative
