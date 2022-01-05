@@ -8,6 +8,10 @@
 #include "../../Options.hpp"       // config-file parser
 #include "../../Science.hpp"       // Science content
 
+// Defines limits of intrinsic types. Used as default values for
+// T1_max, T1_min, S1_max and/orS1_min
+#include <limits>
+
 // Tensor variables for indexing
 blitz::firstIndex ii;
 blitz::secondIndex jj;
@@ -29,6 +33,12 @@ const int x_ind = 0;
 const int y_ind = 1;
 const int z_ind = 2;
 
+// QSP variables
+double T1_max, S1_max, T1_min, S1_min;
+char T1_name, S1_name;
+int NT, NS;
+string QSP_filename;
+
 // physical parameters
 double visco;                       // viscosity (m^2/s)
 double rho_0;                       // reference density (kg/m^3)
@@ -38,7 +48,7 @@ double g;                           // acceleration due to gravity (m/s^2)
 int plotnum;
 
 // Derivative options
-string deriv_filenames;              // file name to take derivative of
+string deriv_filenames;             // file name to take derivative of
 int start_sequence;                 // output number to start taking derivatives at
 int final_sequence;                 // output number to stop  taking derivatives at
 int step_sequence;                  // step between outputs to take derivatives
@@ -52,8 +62,9 @@ bool do_enst_stretch;               // Do enstrophy production term from vortex 
 bool do_Q;                          // Do second invariant of grad(u,v,w)?
 bool do_R;                          // Do third invariant/det of grad(u,v,w)?
 bool do_Q_and_R;                    // Do the second and third invariants?
-bool do_lambda2;                     // Do lambda2/Hussain's Lambda?
+bool do_lambda2;                    // Do lambda2/Hussain's Lambda?
 bool v_exist;                       // Does the v field exist?
+bool do_hist;                       // Create QSP data?
 
 /* ------------------ Adjust the class --------------------- */
 
@@ -87,7 +98,7 @@ class userControl : public BaseCase {
         /* Set other things */
         double get_visco() const { return visco; }
         int get_restart_sequence() const { return plotnum; }
-            
+
         /* Read grid (if mapped) */
         bool is_mapped() const { return mapped; }
         void do_mapping(DTArray & xg, DTArray & yg, DTArray & zg) {
@@ -116,24 +127,25 @@ class userControl : public BaseCase {
             //string prev_deriv, base_field;
             vector<string> fields;      // vector of fields to take derivatives
             split(deriv_filenames.c_str(), ' ', fields);    // populate that vector
-            if ( do_vort_stretch or do_enst_stretch or do_Q or do_R or do_Q_and_R or do_lambda2 ) { 
+            if ( do_vort_stretch or do_enst_stretch or do_Q or do_R or
+                 do_Q_and_R or do_lambda2 or do_hist ) {
                 temp1 = alloc_array(Nx,Ny,Nz);
                 temp2 = alloc_array(Nx,Ny,Nz);
-                if ( do_enst_stretch )               
+                if ( do_enst_stretch )
                     temp3 = alloc_array(Nx,Ny,Nz);
             }
-            
-            if ( do_barvor ) { 
+
+            if ( do_barvor ) {
                 temp4 = alloc_array(Nx,Ny,Nz);
             }
 
             if ( do_lambda2 ) {
-               A11 = alloc_array(Nx,Ny,Nz); 
-               A12 = alloc_array(Nx,Ny,Nz); 
-               A13 = alloc_array(Nx,Ny,Nz); 
-               A22 = alloc_array(Nx,Ny,Nz); 
-               A23 = alloc_array(Nx,Ny,Nz); 
-               A33 = alloc_array(Nx,Ny,Nz); 
+               A11 = alloc_array(Nx,Ny,Nz);
+               A12 = alloc_array(Nx,Ny,Nz);
+               A13 = alloc_array(Nx,Ny,Nz);
+               A22 = alloc_array(Nx,Ny,Nz);
+               A23 = alloc_array(Nx,Ny,Nz);
+               A33 = alloc_array(Nx,Ny,Nz);
             }
             // Compute derivatives at each requested output
             for ( plotnum = start_sequence; plotnum <= final_sequence;
@@ -154,7 +166,7 @@ class userControl : public BaseCase {
                         // parse for expansion type
                         find_expansion(grid_type, expan, fields[var_num]);
 
-                        // read the field and setup for derivative 
+                        // read the field and setup for derivative
                         if ( fields[var_num] == "v" ) {
                             saved_v = true;
                             init_tracer_restart(fields[var_num],v);
@@ -224,7 +236,7 @@ class userControl : public BaseCase {
                         }
                     }
                 }
-                
+
                 // Baroclinic vorticity
 
                 if ( do_barvor ) {
@@ -239,23 +251,23 @@ class userControl : public BaseCase {
                        compute_baroclinic_vort_x(deriv_var, u, gradient_op, grid_type);
                        deriv_var=deriv_var*g;
                        write_array(deriv_var,"barx",plotnum);
-                       if (master()) fprintf(stdout,"Completed the write for barx.%d\n",plotnum); 
+                       if (master()) fprintf(stdout,"Completed the write for barx.%d\n",plotnum);
                     }
-                    
+
                     compute_baroclinic_vort_y(deriv_var, u, gradient_op, grid_type);
                     deriv_var=deriv_var*g;
                     write_array(deriv_var,"bary",plotnum);
                     if (master()) fprintf(stdout,"Completed the write for bary.%d\n",plotnum);
-                     
+
                     // Restart u
                     u = 0;
                 }
 
-                // read in fields (if not already stored in memory) 
+                // read in fields (if not already stored in memory)
                 if ( do_vor_x or do_vor_y or do_vor_z or
-                        do_enstrophy or do_dissipation or 
-                        do_vort_stretch or do_enst_stretch or 
-                        do_Q or do_R or do_Q_and_R or do_lambda2 ) {
+                        do_enstrophy or do_dissipation or
+                        do_vort_stretch or do_enst_stretch or
+                        do_Q or do_R or do_Q_and_R or do_lambda2 or do_hist ) {
                     // u
                     init_tracer_restart("u",u);
                     // v
@@ -299,7 +311,7 @@ class userControl : public BaseCase {
                     write_array(deriv_var,"vortz",plotnum);
                     if (master())
                         fprintf(stdout,"Completed the write for vortz.%d\n",plotnum);
-                }                    
+                }
 
                 // Calculate Enstrophy
                 if ( do_enstrophy ) {
@@ -373,7 +385,7 @@ class userControl : public BaseCase {
                     write_array(deriv_var,"Q",plotnum);
                     if (master()) fprintf(stdout,"Completed the write for Q.%d\n",plotnum);
                 }
-                
+
                 // Calculate R/third invariant of grad(u,v,w)
                 if ( do_R or do_Q_and_R ) {
                     R_invt(deriv_var, u, v, w, *temp1, *temp2, gradient_op, grid_type, v_exist);
@@ -385,13 +397,29 @@ class userControl : public BaseCase {
 
                 // Calculate lambda2/second eigenvalue of S^2+Omega^2
                 if ( do_lambda2 ){
-                    compute_lambda2( deriv_var, u, v, w, *temp1, *temp2, gradient_op, 
+                    compute_lambda2( deriv_var, u, v, w, *temp1, *temp2, gradient_op,
                             grid_type, *A11, *A12, *A13, *A22, *A23, *A33);
                     double max_var = psmax(max(abs(deriv_var)));
                     if (master()) fprintf(stdout,"Max lam2: %.6g\n",max_var);
                     write_array(deriv_var,"lam2",plotnum);
                     if (master()) fprintf(stdout,"Completed the write for lam2.%d\n",plotnum);
-                
+
+                }
+
+                // Compute QSP data. The code promises to not mutate the arrays,
+                // nor to make deep copies of them
+                if ( do_hist ){
+                    // Read in T to temp1 if required.
+                    if (T1_name == 't' || S1_name == 't' || T1_name == 'T' ||
+                        S1_name == 'T') {
+                        init_tracer_restart("t", *temp1);
+                    }
+                    QSPCount(*temp1, u, v, w, T1_name, S1_name, NS, NT,
+                             T1_max, S1_max, T1_min, S1_min,
+                             Nx, Ny, Nz, QSP_filename, plotnum);
+                    if (master()) {
+                      fprintf(stdout, "Completed the write for QSP.%d\n", plotnum);
+                    }
                 }
             }
         }
@@ -465,6 +493,16 @@ int main(int argc, char ** argv) {
     add_option("do_R",&do_R,false,"Calculate R?");
     add_option("do_Q_and_R",&do_Q_and_R,false,"Calculate Q and R?");
     add_option("do_lambda2",&do_lambda2,false,"Calculate Lambda2?");
+    add_option("do_hist",&do_hist,false,"Create QSP Data?");
+    add_option("T1",&T1_name,'t', "Name of tracer 1 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
+    add_option("S1",&S1_name,'w', "Name of tracer 2 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
+    add_option("T1_max",&T1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for T1 in QSP.");
+    add_option("T1_min",&T1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for T1 in QSP.");
+    add_option("S1_max",&S1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for S1 in QSP.");
+    add_option("S1_min",&S1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for S1 in QSP.");
+    add_option("QSP_filename",&QSP_filename,"QSP_default", "Filename to save data to. Don't include file extension.");
+    add_option("NS",&NS,10,"Number of bins for tracer S");
+    add_option("NT",&NT,10,"Number of bins for tracer T");
     add_option("v_exist",&v_exist,"Does the v field exist?");
     // Parse the options from the command line and config file
     options_parse(argc,argv);
@@ -489,13 +527,13 @@ int main(int argc, char ** argv) {
     }
     if (visco==1.0){
         if (master())
-            fprintf(stdout,"You may have forgotten to specify viscosity, " 
+            fprintf(stdout,"You may have forgotten to specify viscosity, "
                     "Using default value visco = 1.\n");
     }
 
     if (rho_0==1000.0){
         if (master())
-            fprintf(stdout,"You may have forgotten to specify reference density, " 
+            fprintf(stdout,"You may have forgotten to specify reference density, "
                     "Using default value rho_0 = 1000.\n");
     }
 
