@@ -26,7 +26,9 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
               const char T1_name, const char S1_name, const int NS,
               const int NT, double T1_max, double S1_max, double T1_min,
               double S1_min, const int Nx, const int Ny, const int Nz,
-              string filename, const int plotnum) {
+              string filename, const int plotnum, bool grab_grids,
+              TArrayn::DTArray *xgrid, TArrayn::DTArray *ygrid,
+              TArrayn::DTArray *zgrid) {
 
   int local_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &local_rank);
@@ -175,7 +177,7 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
   double hS_inv = 1 / hS;
   double hT_inv = 1 / hT;
 
-  int *local_hist = (int *)calloc(NS * NT, sizeof(int));
+  double *local_hist = (double *)calloc(NS * NT, sizeof(double));
   if (!local_hist) {
     std::cout << "Bad memory allocation. Exiting QSPCount" << std::endl;
     return;
@@ -242,21 +244,37 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
         } else if (idxS >= NS) {
           idxS = 0;
         }
-        local_hist[index(idxS, idxT, NS, NT)] += 1;
+
+        double volume_weight;
+        if (grab_grids) {
+          double xgrid_weight, ygrid_weight, zgrid_weight;
+          xgrid_weight = (*xgrid)(i, j, k);
+          if (Ny > 1) { // Only dereference if not NULL
+            ygrid_weight = (*ygrid)(i, j, k);
+          } else {
+            ygrid_weight = 1.0; // Be passive if not included
+          }
+          zgrid_weight = (*zgrid)(i, j, k);
+          volume_weight = xgrid_weight * ygrid_weight * zgrid_weight;
+        } else {
+          volume_weight = 1.0;
+        }
+
+        local_hist[index(idxS, idxT, NS, NT)] += volume_weight;
       }
     }
   }
 
   MPI_Barrier(MPI_COMM_WORLD); // Wait for everyone to finish
   if (local_rank == 0) {
-    int *glob_hist = (int *)calloc(NS * NT, sizeof(int));
+    double *glob_hist = (double *)calloc(NS * NT, sizeof(double));
     if (!glob_hist) {
       std::cout << "Bad memory allocation. Exiting QSPCount" << std::endl;
       free(local_hist);
       return;
     }
     MPI_Reduce(local_hist, glob_hist, // send and receive buffers
-               NS * NT, MPI_INT,      // count and datatype
+               NS * NT, MPI_DOUBLE,      // count and datatype
                MPI_SUM, 0,            // Reduction operator and root process #
                MPI_COMM_WORLD);       // Communicator
     filename = filename + "." + boost::lexical_cast<string>(plotnum) + ".csv";
@@ -279,7 +297,7 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
     free(glob_hist);
   } else {
     MPI_Reduce(local_hist, NULL, // send and receive buffers
-               NS * NT, MPI_INT, // count and datatype
+               NS * NT, MPI_DOUBLE, // count and datatype
                MPI_SUM, 0,       // Reduction operator and root process #
                MPI_COMM_WORLD);  // Communicator
   }

@@ -258,7 +258,9 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
               const char T1_name, const char S1_name, const int NS,
               const int NT, double T1_max, double S1_max, double T1_min,
               double S1_min, const int Nx, const int Ny, const int Nz,
-              string filename, const int plotnum);
+              string filename, const int plotnum, bool grab_grids,
+              TArrayn::DTArray *xgrid, TArrayn::DTArray *ygrid,
+              TArrayn::DTArray *zgrid);
 
 // Equation of state for seawater, polynomial fit from
 // Brydon, Sun, Bleck (1999) (JGR)
