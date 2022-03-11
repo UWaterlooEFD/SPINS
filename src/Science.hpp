@@ -258,7 +258,7 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
               const char T1_name, const char S1_name, const int NS,
               const int NT, double T1_max, double S1_max, double T1_min,
               double S1_min, const int Nx, const int Ny, const int Nz,
-              string filename, const int plotnum, bool grab_grids,
+              string filename, const int plotnum, bool mapped,
               TArrayn::DTArray *xgrid, TArrayn::DTArray *ygrid,
               TArrayn::DTArray *zgrid);
 
