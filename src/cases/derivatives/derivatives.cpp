@@ -39,7 +39,7 @@ double T1_max, S1_max, T1_min, S1_min;
 char T1_name, S1_name;
 int NT, NS;
 string QSP_filename;
-bool grab_grids;
+bool use_salinity;
 
 // physical parameters
 double visco;                       // viscosity (m^2/s)
@@ -138,7 +138,7 @@ class userControl : public BaseCase {
 
                 // If user asks to grab the grids, we allocate arrays to store
                 // them in memory
-                if (grab_grids) {
+                if (mapped) {
                   xgrid = alloc_array(Nx, Ny, Nz);
                   if (Ny > 1) {
                     ygrid = alloc_array(Nx, Ny, Nz);
@@ -429,15 +429,17 @@ class userControl : public BaseCase {
                 // Compute QSP data. The code promises to not mutate the arrays,
                 // nor to make deep copies of them
                 if ( do_hist ){
-                    // Read in T to temp1 if required.
-                    if (T1_name == 't' || S1_name == 't' || T1_name == 'T' ||
+
+                    if (use_salinity) {
+                      init_tracer_restart("s", *temp1);
+                    } else if (T1_name == 't' || S1_name == 't' || T1_name == 'T' ||
                         S1_name == 'T') {
                         init_tracer_restart("t", *temp1);
                     }
 
                     // If user asked to grab the grids, we populate the grids
                     // with the correct data from disk
-                    if (grab_grids) {
+                    if (mapped) {
                       do_mapping(*xgrid, *ygrid, *zgrid);
                     } else {
                       // Make sure that if the user didn't want us to grab the
@@ -449,7 +451,7 @@ class userControl : public BaseCase {
 
                     QSPCount(*temp1, u, v, w, T1_name, S1_name, NS, NT, T1_max,
                              S1_max, T1_min, S1_min, Nx, Ny, Nz, QSP_filename,
-                             plotnum, grab_grids, xgrid, ygrid, zgrid);
+                             plotnum, mapped, xgrid, ygrid, zgrid);
                     if (master()) {
                       fprintf(stdout, "Completed the write for QSP.%d\n", plotnum);
                     }
@@ -527,7 +529,6 @@ int main(int argc, char ** argv) {
     add_option("do_R",&do_R,false,"Calculate R?");
     add_option("do_Q_and_R",&do_Q_and_R,false,"Calculate Q and R?");
     add_option("do_lambda2",&do_lambda2,false,"Calculate Lambda2?");
-    add_option("grab_grids",&grab_grids,false,"Grab grid data? (NOTE: grid data is expected to be named xgrid, ygrid zgrid).");
     add_option("do_hist",&do_hist,false,"Create QSP Data?");
     add_option("T1",&T1_name,'t', "Name of tracer 1 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
     add_option("S1",&S1_name,'w', "Name of tracer 2 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
@@ -535,6 +536,7 @@ int main(int argc, char ** argv) {
     add_option("T1_min",&T1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for T1 in QSP.");
     add_option("S1_max",&S1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for S1 in QSP.");
     add_option("S1_min",&S1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for S1 in QSP.");
+    add_option("QSP_salinity",&use_salinity, false, "Should salinity be read in from filename s?.");
     add_option("QSP_filename",&QSP_filename,"QSP_default", "Filename to save data to. Don't include file extension.");
     add_option("NS",&NS,10,"Number of bins for tracer S");
     add_option("NT",&NT,10,"Number of bins for tracer T");

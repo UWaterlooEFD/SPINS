@@ -318,8 +318,8 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
         double volume_weight;
         if (mapped) {
           // Calculate the Lz range
-          double Lzmax_now = global_z_max(ii, jj);
-          double Lzmin_now = global_z_min(ii, jj);
+          double Lzmax_now = global_z_max(i, j);
+          double Lzmin_now = global_z_min(i, j);
 
           // Calculate the arc length
           double arc, z_high, z_low, cos_high, cos_low;
