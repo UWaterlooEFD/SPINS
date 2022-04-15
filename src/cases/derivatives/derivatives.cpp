@@ -36,7 +36,7 @@ const int z_ind = 2;
 
 // QSP variables
 double T1_max, S1_max, T1_min, S1_min;
-char T1_name, S1_name;
+string T1_name, S1_name;
 int NT, NS;
 string QSP_filename;
 bool use_salinity;
@@ -152,7 +152,7 @@ class userControl : public BaseCase {
                   zgrid = NULL;
                 }
 
-                if ( do_enst_stretch ) temp3 = alloc_array(Nx,Ny,Nz);
+                if ( do_enst_stretch or do_hist ) temp3 = alloc_array(Nx,Ny,Nz);
             }
 
             if ( do_barvor ) {
@@ -430,13 +430,6 @@ class userControl : public BaseCase {
                 // nor to make deep copies of them
                 if ( do_hist ){
 
-                    if (use_salinity) {
-                      init_tracer_restart("s", *temp1);
-                    } else if (T1_name == 't' || S1_name == 't' || T1_name == 'T' ||
-                        S1_name == 'T') {
-                        init_tracer_restart("t", *temp1);
-                    }
-
                     // If user asked to grab the grids, we populate the grids
                     // with the correct data from disk
                     if (mapped) {
@@ -449,9 +442,49 @@ class userControl : public BaseCase {
                       assert(zgrid == NULL);
                     }
 
-                    QSPCount(*temp1, u, v, w, T1_name, S1_name, NS, NT, T1_max,
-                             S1_max, T1_min, S1_min, Nx, Ny, Nz, QSP_filename,
-                             plotnum, mapped, xgrid, ygrid, zgrid);
+                    QSPOptions qsp_opts;
+                    qsp_opts.S1_name = S1_name;
+                    qsp_opts.T1_name = T1_name;
+                    qsp_opts.filename = filename;
+                    qsp_opts.NS = NS;
+                    qsp_opts.NT = NT;
+                    qsp_opts.S1_max = S1_max;
+                    qsp_opts.S1_min = S1_min;
+                    qsp_opts.T1_max = T1_max;
+                    qsp_opts.T1_min = T1_min;
+
+                    QSPData qsp_data;
+                    qsp_data.mapped = mapped;
+                    qsp_data.Nx = Nx;
+                    qsp_data.Ny = Ny;
+                    qsp_data.Nz = Nz;
+                    qsp_data.plotnum = plotnum;
+                    qsp_data.u = &u;
+                    qsp_data.v = &v;
+                    qsp_data.w = &w;
+                    qsp_data.xgrid = xgrid;
+                    qsp_data.ygrid = ygrid;
+                    qsp_data.zgrid = zgrid;
+
+                    qsp_data.temp = NULL;
+                    qsp_data.rho = NULL;
+                    qsp_data.salinity = NULL;
+
+                    if (use_salinity) {
+                      init_tracer_restart("s", *temp1);
+                      qsp_data.salinity = temp1;
+                    }
+                    if (T1_name.compare("temp") == 0 || S1_name.compare("temp") == 0) {
+                      init_tracer_restart("T", *temp2);
+                      qsp_data.temp = temp2;
+                    }
+                    if (T1_name.compare("rho") == 0 || S1_name.compare("rho") == 0) {
+                      init_tracer_restart("t", *temp3);
+                      qsp_data.rho = temp3;
+                    }
+
+                    QSPCount(qsp_opts, qsp_data);
+
                     if (master()) {
                       fprintf(stdout, "Completed the write for QSP.%d\n", plotnum);
                     }
@@ -530,13 +563,13 @@ int main(int argc, char ** argv) {
     add_option("do_Q_and_R",&do_Q_and_R,false,"Calculate Q and R?");
     add_option("do_lambda2",&do_lambda2,false,"Calculate Lambda2?");
     add_option("do_hist",&do_hist,false,"Create QSP Data?");
-    add_option("T1",&T1_name,'t', "Name of tracer 1 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
-    add_option("S1",&S1_name,'w', "Name of tracer 2 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
+    add_option("T1",&T1_name,"u", "Name of tracer 1 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
+    add_option("S1",&S1_name,"w", "Name of tracer 2 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
     add_option("T1_max",&T1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for T1 in QSP.");
     add_option("T1_min",&T1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for T1 in QSP.");
     add_option("S1_max",&S1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for S1 in QSP.");
     add_option("S1_min",&S1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for S1 in QSP.");
-    add_option("QSP_salinity",&use_salinity, false, "Should salinity be read in from filename s?.");
+    add_option("salinity",&use_salinity, false, "Should salinity be read in from filename s?.");
     add_option("QSP_filename",&QSP_filename,"QSP_default", "Filename to save data to. Don't include file extension.");
     add_option("NS",&NS,10,"Number of bins for tracer S");
     add_option("NT",&NT,10,"Number of bins for tracer T");

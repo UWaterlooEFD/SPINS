@@ -68,35 +68,6 @@ enum QSPType {
   QSP_salinity,
 };
 
-struct QSPOptions {
-  int NS;
-  int NT;
-  string filename;
-  double S1_max;
-  double S1_min;
-  double T1_max;
-  double T1_min;
-  string T1_name;
-  string S1_name;
-};
-
-struct QSPData {
-  TArrayn::DTArray *u;
-  TArrayn::DTArray *v;
-  TArrayn::DTArray *w;
-  TArrayn::DTArray *temp;
-  TArrayn::DTArray *rho;
-  TArrayn::DTArray *salinity;
-  TArrayn::DTArray *xgrid;
-  TArrayn::DTArray *ygrid;
-  TArrayn::DTArray *zgrid;
-  int Nx;
-  int Ny;
-  int Nz;
-  int plotnum;
-  bool mapped;
-};
-
 void QSP_write(int local_rank, const QSPVector &local_hist,
                const QSPOptions &qsp_options, const QSPData &qsp_data) {
   if (local_rank == 0) {
