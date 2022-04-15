@@ -265,18 +265,22 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
     return;
   }
 
-  TArrayn::DTArray *temp_ptr;
-  if (S1_ptr) { // If S1 is not ke
-    temp_ptr = S1_ptr;
-  } else { // If S1 is ke we know u must exist
-    temp_ptr = qsp_data.u;
+  int i_low, j_low, k_low, i_high, j_high, k_high;
+
+  {
+    TArrayn::DTArray *temp_ptr;
+    if (S1_ptr) { // If S1 is not ke
+      temp_ptr = S1_ptr;
+    } else { // If S1 is ke we know u must exist
+      temp_ptr = qsp_data.u;
+    }
+    i_low = temp_ptr->lbound(blitz::firstDim);
+    j_low = temp_ptr->lbound(blitz::secondDim);
+    k_low = temp_ptr->lbound(blitz::thirdDim);
+    i_high = temp_ptr->ubound(blitz::firstDim);
+    j_high = temp_ptr->ubound(blitz::secondDim);
+    k_high = temp_ptr->ubound(blitz::thirdDim);
   }
-  int i_low = S1_ptr->lbound(blitz::firstDim);
-  int j_low = S1_ptr->lbound(blitz::secondDim);
-  int k_low = S1_ptr->lbound(blitz::thirdDim);
-  int i_high = S1_ptr->ubound(blitz::firstDim);
-  int j_high = S1_ptr->ubound(blitz::secondDim);
-  int k_high = S1_ptr->ubound(blitz::thirdDim);
 
   double double_max = std::numeric_limits<double>::max();
   if (qsp_options.T1_max == double_max || qsp_options.S1_max == double_max ||
@@ -285,8 +289,10 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
               j_low, k_low, i_high, j_high, k_high);
   }
 
-  double hS = (qsp_options.S1_max - qsp_options.S1_min) / (double)qsp_options.NS;
-  double hT = (qsp_options.T1_max - qsp_options.T1_min) / (double)qsp_options.NT;
+  double hS =
+      (qsp_options.S1_max - qsp_options.S1_min) / (double)qsp_options.NS;
+  double hT =
+      (qsp_options.T1_max - qsp_options.T1_min) / (double)qsp_options.NT;
   double hS_inv = 1 / hS;
   double hT_inv = 1 / hT;
 
@@ -375,10 +381,10 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
           break;
         }
 
-        int idxS = floor((Sval - S1_min) * hS_inv);
-        int idxT = floor((Tval - T1_min) * hT_inv);
-        idxS = std::max(std::min(idxS, qsp_options.NS), 0);
-        idxT = std::max(std::min(idxT, qsp_options.NT), 0);
+        int idxS = floor((Sval - qsp_options.S1_min) * hS_inv);
+        int idxT = floor((Tval - qsp_options.T1_min) * hT_inv);
+        idxS = std::max(std::min(idxS, qsp_options.NS - 1), 0);
+        idxT = std::max(std::min(idxT, qsp_options.NT - 1), 0);
 
         double volume_weight;
         if (qsp_data.mapped) {

@@ -445,7 +445,7 @@ class userControl : public BaseCase {
                     QSPOptions qsp_opts;
                     qsp_opts.S1_name = S1_name;
                     qsp_opts.T1_name = T1_name;
-                    qsp_opts.filename = filename;
+                    qsp_opts.filename = QSP_filename;
                     qsp_opts.NS = NS;
                     qsp_opts.NT = NT;
                     qsp_opts.S1_max = S1_max;
@@ -475,11 +475,11 @@ class userControl : public BaseCase {
                       qsp_data.salinity = temp1;
                     }
                     if (T1_name.compare("temp") == 0 || S1_name.compare("temp") == 0) {
-                      init_tracer_restart("T", *temp2);
+                      init_tracer_restart("t", *temp2);
                       qsp_data.temp = temp2;
                     }
                     if (T1_name.compare("rho") == 0 || S1_name.compare("rho") == 0) {
-                      init_tracer_restart("t", *temp3);
+                      init_tracer_restart("rho", *temp3);
                       qsp_data.rho = temp3;
                     }
 
@@ -563,8 +563,8 @@ int main(int argc, char ** argv) {
     add_option("do_Q_and_R",&do_Q_and_R,false,"Calculate Q and R?");
     add_option("do_lambda2",&do_lambda2,false,"Calculate Lambda2?");
     add_option("do_hist",&do_hist,false,"Create QSP Data?");
-    add_option("T1",&T1_name,"u", "Name of tracer 1 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
-    add_option("S1",&S1_name,"w", "Name of tracer 2 for QSP.  Valid values are t (for rho),u,v,w,T (for temp) or k for K.E.");
+    add_option("T1",&T1_name,"u", "Name of tracer 1 for QSP. Valid values are rho,u,v,w,temp or ke");
+    add_option("S1",&S1_name,"w", "Name of tracer 2 for QSP. Valid values are rho,u,v,w,temp or ke");
     add_option("T1_max",&T1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for T1 in QSP.");
     add_option("T1_min",&T1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for T1 in QSP.");
     add_option("S1_max",&S1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for S1 in QSP.");
