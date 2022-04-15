@@ -82,24 +82,26 @@ void QSP_write(int local_rank, const QSPVector &local_hist,
     std::fstream outfile;
     outfile.open(filename.c_str(), std::ios_base::out);
     if (outfile.is_open()) {
-      outfile << T1_max << ',' << T1_min << ',' << S1_max << ',' << S1_min;
-      for (int i = 4; i < NT; i++) {
+      outfile << qsp_options.T1_max << ',' << qsp_options.T1_min << ','
+              << qsp_options.S1_max << ',' << qsp_options.S1_min;
+      for (int i = 4; i < qsp_options.NT; i++) {
         outfile << ',' << 0;
       }
       outfile << std::endl;
-      for (int ii = 0; ii < NS; ii++) {
+      for (int ii = 0; ii < qsp_options.NS; ii++) {
         outfile << glob_hist(ii, 0);
-        for (int jj = 1; jj < NT; jj++) {
+        for (int jj = 1; jj < qsp_options.NT; jj++) {
           outfile << ',' << glob_hist(ii, jj);
         }
         outfile << std::endl;
       }
     }
   } else {
-    MPI_Reduce(local_hist.raw(), NULL, // send and receive buffers
-               NS * NT, MPI_DOUBLE,    // count and datatype
-               MPI_SUM, 0,             // Reduction operator and root process
-               MPI_COMM_WORLD);        // Communicator
+    MPI_Reduce(local_hist.raw(), NULL,          // send and receive buffers
+               qsp_options.NS * qsp_options.NT, // count
+               MPI_DOUBLE,                      // datatype
+               MPI_SUM, 0,      // Reduction operator and root process
+               MPI_COMM_WORLD); // Communicator
   }
 }
 
@@ -154,7 +156,8 @@ TArrayn::DTArray *QSPPtr(const QSPData &qsp_data, const QSPType &type) {
 
 void QSPMaxMin(const QSPType &T1_type, const QSPType &S1_type,
                TArrayn::DTArray *T1_ptr, TArrayn::DTArray *S1_ptr,
-               QSPOptions &qsp_options, const QSPData &qsp_data) {
+               QSPOptions &qsp_options, const QSPData &qsp_data, int i_low,
+               int j_low, int k_low, int i_high, int j_high, int k_high) {
   double double_max = std::numeric_limits<double>::max();
 
   // If One of the variables is K.E or rho, we need to hand-roll the max / min
@@ -172,7 +175,7 @@ void QSPMaxMin(const QSPType &T1_type, const QSPType &S1_type,
             double ke_current = 0;
             tmp = (*qsp_data.u)(i, j, k);
             ke_current += tmp * tmp;
-            if (Ny > 1) {
+            if (qsp_data.Ny > 1) {
               tmp = (*qsp_data.v)(i, j, k);
               ke_current += tmp * tmp;
             }
@@ -183,7 +186,17 @@ void QSPMaxMin(const QSPType &T1_type, const QSPType &S1_type,
             ke_min = ke_current < ke_min ? ke_current : ke_min;
           }
           if (T1_type == QSP_rho || S1_type == QSP_rho) {
-            double rho_current = eqn_of_state_t(t(i, j, k));
+            double rho_current;
+            if (qsp_data.rho) {
+              rho_current = (*qsp_data.rho)(i, j, k);
+            } else if (qsp_data.temp && !qsp_data.salinity) {
+              rho_current = eqn_of_state_t((*qsp_data.temp)(i, j, k));
+            } else if (qsp_data.temp && qsp_data.salinity) {
+              rho_current = eqn_of_state((*qsp_data.temp)(i, j, k),
+                                         (*qsp_data.salinity)(i, j, k));
+            } else {
+              rho_current = 0;
+            }
             rho_max = rho_current > rho_max ? rho_current : rho_max;
             rho_min = rho_current < rho_min ? rho_current : rho_min;
           }
@@ -252,7 +265,6 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
     return;
   }
 
-  int i_low, j_low, k_low, i_high, j_high, k_high;
   TArrayn::DTArray *temp_ptr;
   if (S1_ptr) { // If S1 is not ke
     temp_ptr = S1_ptr;
@@ -269,11 +281,12 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
   double double_max = std::numeric_limits<double>::max();
   if (qsp_options.T1_max == double_max || qsp_options.S1_max == double_max ||
       qsp_options.T1_min == -double_max || qsp_options.S1_min == -double_max) {
-    QSPMaxMin(T1_type, S1_type, T1_ptr, S1_ptr, qsp_options, qsp_data);
+    QSPMaxMin(T1_type, S1_type, T1_ptr, S1_ptr, qsp_options, qsp_data, i_low,
+              j_low, k_low, i_high, j_high, k_high);
   }
 
-  double hS = (qsp_options.S1_max - qsp_options.S1_min) / (double)NS;
-  double hT = (qsp_options.T1_max - qsp_options.T1_min) / (double)NT;
+  double hS = (qsp_options.S1_max - qsp_options.S1_min) / (double)qsp_options.NS;
+  double hT = (qsp_options.T1_max - qsp_options.T1_min) / (double)qsp_options.NT;
   double hS_inv = 1 / hS;
   double hT_inv = 1 / hT;
 
@@ -304,10 +317,12 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
         local_z_min(ii, jj) = tmp_z_min;
       }
     }
-    MPI_Allreduce(local_z_min.raw(), global_z_min.raw(), Nx * Ny, MPI_DOUBLE,
-                  MPI_MIN, MPI_COMM_WORLD);
-    MPI_Allreduce(local_z_max.raw(), global_z_max.raw(), Nx * Ny, MPI_DOUBLE,
-                  MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(local_z_min.raw(), global_z_min.raw(),
+                  qsp_data.Nx * qsp_data.Ny, MPI_DOUBLE, MPI_MIN,
+                  MPI_COMM_WORLD);
+    MPI_Allreduce(local_z_max.raw(), global_z_max.raw(),
+                  qsp_data.Nx * qsp_data.Ny, MPI_DOUBLE, MPI_MAX,
+                  MPI_COMM_WORLD);
   }
 
   // Main loop for QSP
@@ -323,7 +338,7 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
           Tval += tmp * tmp;
           tmp = (*qsp_data.w)(i, j, k);
           Tval += tmp * tmp;
-          if (Ny > 1) {
+          if (qsp_data.Ny > 1) {
             tmp = (*qsp_data.v)(i, j, k);
             Tval += tmp * tmp;
           }
@@ -345,7 +360,7 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
           Sval += tmp * tmp;
           tmp = (*qsp_data.w)(i, j, k);
           Sval += tmp * tmp;
-          if (Ny > 1) {
+          if (qsp_data.Ny > 1) {
             tmp = (*qsp_data.v)(i, j, k);
             Sval += tmp * tmp;
           }
@@ -373,21 +388,21 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
 
           // Calculate the arc length
           double arc, z_high, z_low, cos_high, cos_low;
-          if (k > 0 && k < Nz - 1) {
+          if (k > 0 && k < qsp_data.Nz - 1) {
             z_high = (double)(k + 1);
             z_low = (double)(k - 1);
           } else if (k == 0) {
             z_high = (double)(k + 1);
             z_low = (double)(k);
-          } else if (k == Nz - 1) {
+          } else if (k == qsp_data.Nz - 1) {
             z_high = (double)(k);
             z_low = (double)(k - 1);
           } else { // Failure
             std::cout << "k was out of bounds somehow. Failing...\n";
             return;
           }
-          cos_high = std::cos(M_PI * z_high / (double)Nz);
-          cos_low = std::cos(M_PI * z_low / (double)Nz);
+          cos_high = std::cos(M_PI * z_high / (double)qsp_data.Nz);
+          cos_low = std::cos(M_PI * z_low / (double)qsp_data.Nz);
           arc = 0.5 * (cos_low - cos_high);
 
           // Calculate the volume weight
