@@ -272,6 +272,8 @@ struct QSPData {
   TArrayn::DTArray *temp;
   TArrayn::DTArray *rho;
   TArrayn::DTArray *salinity;
+  TArrayn::DTArray *custom_T1;
+  TArrayn::DTArray *custom_S1;
   TArrayn::DTArray *xgrid;
   TArrayn::DTArray *ygrid;
   TArrayn::DTArray *zgrid;

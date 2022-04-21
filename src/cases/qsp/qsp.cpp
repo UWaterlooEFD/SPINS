@@ -8,10 +8,9 @@
 #include "../../Options.hpp"  // config-file parser
 #include "../../Science.hpp"  // Science content
 
-// Defines limits of intrinsic types. Used as default values for
-// T1_max, T1_min, S1_max and/orS1_min
 #include <cassert>
 #include <limits>
+#include <string>
 
 // Tensor variables for indexing
 blitz::firstIndex ii;
@@ -36,21 +35,23 @@ const int z_ind = 2;
 
 // QSP variables
 double T1_max, S1_max, T1_min, S1_min;
-string T1_name, S1_name;
+std::string T1_name, S1_name;
 int NT, NS;
-string QSP_filename;
-bool use_salinity;
+std::string QSP_filename;
+bool use_salinity, read_rho;
+std::string salinity_filename, temp_filename, rho_filename;
+std::string custom_T1_filename, custom_S1_filename;
+const double double_max = std::numeric_limits<double>::max();
 
 // current output number
 int plotnum;
 
 // Derivative options
-string deriv_filenames; // file name to take derivative of
-int start_sequence;     // output number to start taking derivatives at
-int final_sequence;     // output number to stop  taking derivatives at
-int step_sequence;      // step between outputs to take derivatives
-                        // streching/tilting?
-bool v_exist;           // Does the v field exist?
+int start_sequence; // output number to start taking derivatives at
+int final_sequence; // output number to stop  taking derivatives at
+int step_sequence;  // step between outputs to take derivatives
+                    // streching/tilting?
+bool v_exist;       // Does the v field exist?
 
 /* ------------------ Adjust the class --------------------- */
 
@@ -152,22 +153,39 @@ public:
       qsp_data.temp = NULL;
       qsp_data.rho = NULL;
       qsp_data.salinity = NULL;
+      qsp_data.custom_T1 = NULL;
+      qsp_data.custom_S1 = NULL;
 
-      DTArray *arr_salinity, *arr_temperature, *arr_rho;
+      DTArray *arr_salinity, *arr_temperature, *arr_rho, *custom_T1, *custom_S1;
+
       if (use_salinity) {
         arr_salinity = alloc_array(Nx, Ny, Nz);
-        init_tracer_restart("s", *arr_salinity);
+        init_tracer_restart(salinity_filename, *arr_salinity);
         qsp_data.salinity = arr_salinity;
       }
+
+      if (read_rho) {
+        arr_rho = alloc_array(Nx, Ny, Nz);
+        init_tracer_restart(rho_filename, *arr_rho);
+        qsp_data.rho = arr_rho;
+      }
+
       if (T1_name.compare("temp") == 0 || S1_name.compare("temp") == 0) {
         arr_temperature = alloc_array(Nx, Ny, Nz);
-        init_tracer_restart("t", *arr_temperature);
+        init_tracer_restart(temp_filename, *arr_temperature);
         qsp_data.temp = arr_temperature;
       }
-      if (T1_name.compare("rho") == 0 || S1_name.compare("rho") == 0) {
-        arr_rho = alloc_array(Nx, Ny, Nz);
-        init_tracer_restart("rho", *arr_rho);
-        qsp_data.rho = arr_rho;
+
+      if (T1_name.compare("custom") == 0) {
+        custom_T1 = alloc_array(Nx, Ny, Nz);
+        init_tracer_restart(custom_T1_filename, *custom_T1);
+        qsp_data.custom_T1 = custom_T1;
+      }
+
+      if (S1_name.compare("custom") == 0) {
+        custom_S1 = alloc_array(Nx, Ny, Nz);
+        init_tracer_restart(custom_S1_filename, *custom_S1);
+        qsp_data.custom_S1 = custom_S1;
       }
 
       QSPCount(qsp_opts, qsp_data);
@@ -216,27 +234,39 @@ int main(int argc, char **argv) {
   add_option("type_y", &ygrid_type, "FOURIER", "Grid type in Y");
   add_option("type_z", &zgrid_type, "Grid type in Z");
 
-  option_category("Derivative options");
+  option_category("QSP options");
   add_option("start_sequence", &start_sequence,
              "Sequence number to start taking derivatives at");
   add_option("final_sequence", &final_sequence,
              "Sequence number to stop  taking derivatives at");
   add_option("step_sequence", &step_sequence, 1,
              "Step between outputs to take derivatives");
+  add_option("salinity_filename", &salinity_filename,
+             "Base Filename of Salinity data (optional).");
+  add_option("temp_filename", &temp_filename,
+             "Base Filename of temperature data (optional).");
+  add_option("T1_filename", &custom_T1_filename,
+             "Base Filename of custom tracer for T1.");
+  add_option("S1_filename", &custom_S1_filename,
+             "Base Filename of custom tracer for S1.");
   add_option("T1", &T1_name, "u",
-             "Name of tracer 1 for QSP. Valid values are rho,u,v,w,temp or ke");
+             "Name of tracer 1 for QSP. Valid values are rho,u,v,w,temp, "
+             "salinity or ke");
   add_option("S1", &S1_name, "w",
-             "Name of tracer 2 for QSP. Valid values are rho,u,v,w,temp or ke");
-  add_option("T1_max", &T1_max, std::numeric_limits<double>::max(),
+             "Name of tracer 2 for QSP. Valid values are rho,u,v,w,temp, "
+             "salinity or ke");
+  add_option("T1_max", &T1_max, double_max,
              "Maximum explicit bin for T1 in QSP.");
-  add_option("T1_min", &T1_min, std::numeric_limits<double>::min(),
+  add_option("T1_min", &T1_min, -double_max,
              "Minimum explicit bin for T1 in QSP.");
-  add_option("S1_max", &S1_max, std::numeric_limits<double>::max(),
+  add_option("S1_max", &S1_max, double_max,
              "Maximum explicit bin for S1 in QSP.");
-  add_option("S1_min", &S1_min, std::numeric_limits<double>::min(),
+  add_option("S1_min", &S1_min, -double_max,
              "Minimum explicit bin for S1 in QSP.");
   add_option("salinity", &use_salinity, false,
-             "Should salinity be read in from filename s?.");
+             "Should salinity be read in from a file?.");
+  add_option("read_rho", &read_rho, false,
+             "Should rho be read in from a file?.");
   add_option("QSP_filename", &QSP_filename, "QSP_default",
              "Filename to save data to. Don't include file extension.");
   add_option("NS", &NS, 10, "Number of bins for tracer S");

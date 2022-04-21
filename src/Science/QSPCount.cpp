@@ -66,6 +66,7 @@ enum QSPType {
   QSP_temp,
   QSP_rho,
   QSP_salinity,
+  QSP_custom,
 };
 
 void QSP_write(int local_rank, const QSPVector &local_hist,
@@ -121,6 +122,8 @@ QSPType QSPConvert(const std::string &name) {
     converted_type = QSP_rho;
   } else if (name.compare("salinity") == 0) {
     converted_type = QSP_salinity;
+  } else if (name.compare("custom") == 0) {
+    converted_type = QSP_custom;
   }
   return converted_type;
 }
@@ -149,11 +152,15 @@ TArrayn::DTArray *QSPPtr(const QSPData &qsp_data, const QSPType &type) {
   case QSP_salinity:
     ptr = qsp_data.salinity;
     break;
+  case QSP_custom: // Make sure to set the pointer yourself. Can't do it here.
+    break;
   }
 
   return ptr;
 }
 
+// compute the minimum and maximum values for either tracer, then substitute
+// any default values of +- infinity with the global min/max values instead.
 void QSPMaxMin(const QSPType &T1_type, const QSPType &S1_type,
                TArrayn::DTArray *T1_ptr, TArrayn::DTArray *S1_ptr,
                QSPOptions &qsp_options, const QSPData &qsp_data, int i_low,
@@ -214,30 +221,46 @@ void QSPMaxMin(const QSPType &T1_type, const QSPType &S1_type,
                   MPI_COMM_WORLD);
     switch (T1_type) {
     case QSP_ke:
-      qsp_options.T1_max = glob_ke_max;
-      qsp_options.T1_min = glob_ke_min;
+      qsp_options.T1_max =
+          qsp_options.T1_max == double_max ? glob_ke_max : qsp_options.T1_max;
+      qsp_options.T1_min =
+          qsp_options.T1_min == -double_max ? glob_ke_min : qsp_options.T1_min;
       break;
     case QSP_rho:
-      qsp_options.T1_max = glob_rho_max;
-      qsp_options.T1_min = glob_rho_min;
+      qsp_options.T1_max =
+          qsp_options.T1_max == double_max ? glob_rho_max : qsp_options.T1_max;
+      qsp_options.T1_min =
+          qsp_options.T1_min == -double_max ? glob_rho_min : qsp_options.T1_min;
       break;
     default:
-      qsp_options.T1_max = psmax(max(*T1_ptr));
-      qsp_options.T1_min = psmin(min(*T1_ptr));
+      qsp_options.T1_max = qsp_options.T1_max == double_max
+                               ? psmax(max(*T1_ptr))
+                               : qsp_options.T1_max;
+      qsp_options.T1_min = qsp_options.T1_min == -double_max
+                               ? psmin(min(*T1_ptr))
+                               : qsp_options.T1_min;
       break;
     }
     switch (S1_type) {
     case QSP_ke:
-      qsp_options.S1_max = glob_ke_max;
-      qsp_options.S1_min = glob_ke_min;
+      qsp_options.S1_max =
+          qsp_options.S1_max == double_max ? glob_ke_max : qsp_options.S1_max;
+      qsp_options.S1_min =
+          qsp_options.S1_min == -double_max ? glob_ke_min : qsp_options.S1_min;
       break;
     case QSP_rho:
-      qsp_options.S1_max = glob_rho_max;
-      qsp_options.S1_min = glob_rho_min;
+      qsp_options.S1_max =
+          qsp_options.S1_max == double_max ? glob_rho_max : qsp_options.S1_max;
+      qsp_options.S1_min =
+          qsp_options.S1_min == -double_max ? glob_rho_min : qsp_options.S1_min;
       break;
     default:
-      qsp_options.S1_max = psmax(max(*S1_ptr));
-      qsp_options.S1_min = psmin(min(*S1_ptr));
+      qsp_options.S1_max = qsp_options.S1_max == double_max
+                               ? psmax(max(*S1_ptr))
+                               : qsp_options.S1_max;
+      qsp_options.S1_min = qsp_options.S1_min == -double_max
+                               ? psmin(min(*S1_ptr))
+                               : qsp_options.S1_min;
       break;
     }
   } else { // !(cond1 || cond2) == !cond1 && !cond2
@@ -258,6 +281,14 @@ void QSPCount(QSPOptions qsp_options, QSPData qsp_data) {
   QSPType T1_type = QSPConvert(qsp_options.T1_name);
   TArrayn::DTArray *S1_ptr = QSPPtr(qsp_data, S1_type);
   TArrayn::DTArray *T1_ptr = QSPPtr(qsp_data, T1_type);
+
+  if (T1_type == QSP_custom) {
+    T1_ptr = qsp_data.custom_T1;
+  }
+
+  if (S1_type == QSP_custom) {
+    S1_ptr = qsp_data.custom_S1;
+  }
 
   if ((!S1_ptr && S1_type != QSP_ke) || (!T1_ptr && T1_type != QSP_ke)) {
     std::cout << "Not enough data was provided for the requested tracer. "
