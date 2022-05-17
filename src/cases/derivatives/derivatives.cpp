@@ -10,6 +10,7 @@
 
 // Defines limits of intrinsic types. Used as default values for
 // T1_max, T1_min, S1_max and/orS1_min
+#include <cassert>
 #include <limits>
 
 // Tensor variables for indexing
@@ -38,6 +39,7 @@ double T1_max, S1_max, T1_min, S1_min;
 char T1_name, S1_name;
 int NT, NS;
 string QSP_filename;
+bool use_salinity;
 
 // physical parameters
 double visco;                       // viscosity (m^2/s)
@@ -76,6 +78,7 @@ class userControl : public BaseCase {
         DTArray *temp1, *temp2, *temp3;   // arrays for vortex stretching / enstrophy production
         DTArray *temp4; // array for storing temporary array for baroclinic vorticity
         DTArray *A11, *A12, *A13, *A22, *A23, *A33; //Arrays for components of S^2+Omega^2
+        DTArray *xgrid, *ygrid, *zgrid;   // Arrays for storing grid data
 
         /* Size of domain */
         double length_x() const { return Lx; }
@@ -129,10 +132,27 @@ class userControl : public BaseCase {
             split(deriv_filenames.c_str(), ' ', fields);    // populate that vector
             if ( do_vort_stretch or do_enst_stretch or do_Q or do_R or
                  do_Q_and_R or do_lambda2 or do_hist ) {
+
                 temp1 = alloc_array(Nx,Ny,Nz);
                 temp2 = alloc_array(Nx,Ny,Nz);
-                if ( do_enst_stretch )
-                    temp3 = alloc_array(Nx,Ny,Nz);
+
+                // If user asks to grab the grids, we allocate arrays to store
+                // them in memory
+                if (mapped) {
+                  xgrid = alloc_array(Nx, Ny, Nz);
+                  if (Ny > 1) {
+                    ygrid = alloc_array(Nx, Ny, Nz);
+                  }
+                  zgrid = alloc_array(Nx, Ny, Nz);
+                } else {
+                  // If user doesn't want to grab grids, we make sure not to
+                  // allocate arrays for them and to set the pointers to NULL.
+                  xgrid = NULL;
+                  ygrid = NULL;
+                  zgrid = NULL;
+                }
+
+                if ( do_enst_stretch ) temp3 = alloc_array(Nx,Ny,Nz);
             }
 
             if ( do_barvor ) {
@@ -409,18 +429,34 @@ class userControl : public BaseCase {
                 // Compute QSP data. The code promises to not mutate the arrays,
                 // nor to make deep copies of them
                 if ( do_hist ){
-                    // Read in T to temp1 if required.
-                    if (T1_name == 't' || S1_name == 't' || T1_name == 'T' ||
+
+                    if (use_salinity) {
+                      init_tracer_restart("s", *temp1);
+                    } else if (T1_name == 't' || S1_name == 't' || T1_name == 'T' ||
                         S1_name == 'T') {
                         init_tracer_restart("t", *temp1);
                     }
-                    QSPCount(*temp1, u, v, w, T1_name, S1_name, NS, NT,
-                             T1_max, S1_max, T1_min, S1_min,
-                             Nx, Ny, Nz, QSP_filename, plotnum);
+
+                    // If user asked to grab the grids, we populate the grids
+                    // with the correct data from disk
+                    if (mapped) {
+                      do_mapping(*xgrid, *ygrid, *zgrid);
+                    } else {
+                      // Make sure that if the user didn't want us to grab the
+                      // grids then we haven't allocated data to store them!
+                      assert(xgrid == NULL);
+                      assert(ygrid == NULL);
+                      assert(zgrid == NULL);
+                    }
+
+                    QSPCount(*temp1, u, v, w, T1_name, S1_name, NS, NT, T1_max,
+                             S1_max, T1_min, S1_min, Nx, Ny, Nz, QSP_filename,
+                             plotnum, mapped, xgrid, ygrid, zgrid);
                     if (master()) {
                       fprintf(stdout, "Completed the write for QSP.%d\n", plotnum);
                     }
                 }
+
             }
         }
 
@@ -500,6 +536,7 @@ int main(int argc, char ** argv) {
     add_option("T1_min",&T1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for T1 in QSP.");
     add_option("S1_max",&S1_max,std::numeric_limits<double>::max(), "Maximum explicit bin for S1 in QSP.");
     add_option("S1_min",&S1_min,std::numeric_limits<double>::min(), "Minimum explicit bin for S1 in QSP.");
+    add_option("QSP_salinity",&use_salinity, false, "Should salinity be read in from filename s?.");
     add_option("QSP_filename",&QSP_filename,"QSP_default", "Filename to save data to. Don't include file extension.");
     add_option("NS",&NS,10,"Number of bins for tracer S");
     add_option("NT",&NT,10,"Number of bins for tracer T");

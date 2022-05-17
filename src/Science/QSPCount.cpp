@@ -15,6 +15,49 @@
 using namespace Transformer;
 using namespace blitz;
 
+class QSPVector {
+private:
+  double *data;
+  int length;
+  int rows;
+  int cols;
+
+public:
+  explicit QSPVector(int length)
+      : data((double *)calloc(length, sizeof(double))), length(length), rows(0),
+        cols(0) {
+    if (!data) {
+      std::cout << "Error! Data could not be initialized.\n";
+    }
+  }
+  QSPVector(int Nx, int Ny)
+      : data((double *)calloc(Nx * Ny, sizeof(double))), length(Nx * Ny),
+        rows(Nx), cols(Ny) {
+    if (!data) {
+      std::cout << "Error! Data could not be initialized.\n";
+    }
+  }
+  double *raw() const { return data; }
+  int Length() const { return length; }
+  int Rows() const { return rows; }
+  int Cols() const { return cols; }
+  double operator[](int i) const {
+    assert(i >= 0 && i < length);
+    return data[i];
+  }
+  double operator()(int row, int col) const {
+    assert(row >= 0 && row < rows);
+    assert(col >= 0 && col < cols);
+    return data[(row * cols) + col];
+  }
+  double &operator()(int row, int col) {
+    assert(row >= 0 && row < rows);
+    assert(col >= 0 && col < cols);
+    return data[(row * cols) + col];
+  }
+  ~QSPVector() { free(data); }
+};
+
 int index(int row, int col, int rows, int cols) {
   assert(row >= 0 && row < rows);
   assert(col >= 0 && col < cols);
@@ -26,7 +69,9 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
               const char T1_name, const char S1_name, const int NS,
               const int NT, double T1_max, double S1_max, double T1_min,
               double S1_min, const int Nx, const int Ny, const int Nz,
-              string filename, const int plotnum) {
+              string filename, const int plotnum, bool mapped,
+              TArrayn::DTArray *xgrid, TArrayn::DTArray *ygrid,
+              TArrayn::DTArray *zgrid) {
 
   int local_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &local_rank);
@@ -175,10 +220,37 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
   double hS_inv = 1 / hS;
   double hT_inv = 1 / hT;
 
-  int *local_hist = (int *)calloc(NS * NT, sizeof(int));
-  if (!local_hist) {
-    std::cout << "Bad memory allocation. Exiting QSPCount" << std::endl;
-    return;
+  QSPVector local_hist(NS, NT);
+  QSPVector global_z_max(Nx, Ny);
+  QSPVector global_z_min(Nx, Ny);
+  // Find the range of Lz values per 2D-slice
+  if (mapped) {
+    QSPVector local_z_max(Nx, Ny);
+    QSPVector local_z_min(Nx, Ny);
+    //  We are slicing as if we are doing zgrid[i, j, :]
+    for (int ii = i_low; ii <= i_high; ii++) {
+      for (int jj = j_low; jj <= j_high; jj++) {
+        // min is set to the highest possible value so it always gets changed
+        double tmp_z_min = std::numeric_limits<double>::max();
+        // max is set to the lowest possible value so it always gets changed
+        double tmp_z_max = -tmp_z_min;
+        double tmp;
+        for (int kk = k_low; kk <= k_high; kk++) {
+          tmp = (*zgrid)(ii, jj, kk);
+          if (tmp > tmp_z_max) {
+            tmp_z_max = tmp;
+          } else if (tmp < tmp_z_min) {
+            tmp_z_min = tmp;
+          }
+        }
+        local_z_max(ii, jj) = tmp_z_max;
+        local_z_min(ii, jj) = tmp_z_min;
+      }
+    }
+    MPI_Allreduce(local_z_min.raw(), global_z_min.raw(), Nx * Ny, MPI_DOUBLE,
+                  MPI_MIN, MPI_COMM_WORLD);
+    MPI_Allreduce(local_z_max.raw(), global_z_max.raw(), Nx * Ny, MPI_DOUBLE,
+                  MPI_MAX, MPI_COMM_WORLD);
   }
 
   // Main loop for QSP
@@ -242,23 +314,51 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
         } else if (idxS >= NS) {
           idxS = 0;
         }
-        local_hist[index(idxS, idxT, NS, NT)] += 1;
+
+        double volume_weight;
+        if (mapped) {
+          // Calculate the Lz range
+          double Lzmax_now = global_z_max(i, j);
+          double Lzmin_now = global_z_min(i, j);
+
+          // Calculate the arc length
+          double arc, z_high, z_low, cos_high, cos_low;
+          if (k > 0 && k < Nz - 1) {
+            z_high = (double)(k + 1);
+            z_low = (double)(k - 1);
+          } else if (k == 0) {
+            z_high = (double)(k + 1);
+            z_low = (double)(k);
+          } else if (k == Nz - 1) {
+            z_high = (double)(k);
+            z_low = (double)(k - 1);
+          } else { // Failure
+            std::cout << "k was out of bounds somehow. Failing...\n";
+            return;
+          }
+          cos_high = std::cos(M_PI * z_high / (double)Nz);
+          cos_low = std::cos(M_PI * z_low / (double)Nz);
+          arc = 0.5 * (cos_low - cos_high);
+
+          // Calculate the volume weight
+          volume_weight = arc * (Lzmax_now - Lzmin_now);
+        } else {
+          volume_weight = 1.0;
+        }
+
+        // local_hist[index(idxS, idxT, NS, NT)] += volume_weight;
+        local_hist(idxS, idxT) += volume_weight;
       }
     }
   }
 
   MPI_Barrier(MPI_COMM_WORLD); // Wait for everyone to finish
   if (local_rank == 0) {
-    int *glob_hist = (int *)calloc(NS * NT, sizeof(int));
-    if (!glob_hist) {
-      std::cout << "Bad memory allocation. Exiting QSPCount" << std::endl;
-      free(local_hist);
-      return;
-    }
-    MPI_Reduce(local_hist, glob_hist, // send and receive buffers
-               NS * NT, MPI_INT,      // count and datatype
-               MPI_SUM, 0,            // Reduction operator and root process #
-               MPI_COMM_WORLD);       // Communicator
+    QSPVector glob_hist(NS, NT);
+    MPI_Reduce(local_hist.raw(), glob_hist.raw(), // send and receive buffers
+               NS * NT, MPI_DOUBLE,               // count and datatype
+               MPI_SUM, 0,      // Reduction operator and root process #
+               MPI_COMM_WORLD); // Communicator
     filename = filename + "." + boost::lexical_cast<string>(plotnum) + ".csv";
     std::fstream outfile;
     outfile.open(filename.c_str(), std::ios_base::out);
@@ -276,12 +376,10 @@ void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
         outfile << std::endl;
       }
     }
-    free(glob_hist);
   } else {
-    MPI_Reduce(local_hist, NULL, // send and receive buffers
-               NS * NT, MPI_INT, // count and datatype
-               MPI_SUM, 0,       // Reduction operator and root process #
-               MPI_COMM_WORLD);  // Communicator
+    MPI_Reduce(local_hist.raw(), NULL, // send and receive buffers
+               NS * NT, MPI_DOUBLE,    // count and datatype
+               MPI_SUM, 0,             // Reduction operator and root process #
+               MPI_COMM_WORLD);        // Communicator
   }
-  free(local_hist);
 }
