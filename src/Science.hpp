@@ -253,14 +253,38 @@ void compute_lambda2(TArrayn::DTArray & lambda2, TArrayn::DTArray & u,
 /*  Creates and outputs data for plotting a bivariate histogram with NS*NT bins
  *  between tracers S1 and T1 to "filename.csv" (don't include file extension).
  */
-void QSPCount(const TArrayn::DTArray &t, const TArrayn::DTArray &u,
-              const TArrayn::DTArray &v, const TArrayn::DTArray &w,
-              const char T1_name, const char S1_name, const int NS,
-              const int NT, double T1_max, double S1_max, double T1_min,
-              double S1_min, const int Nx, const int Ny, const int Nz,
-              string filename, const int plotnum, bool mapped,
-              TArrayn::DTArray *xgrid, TArrayn::DTArray *ygrid,
-              TArrayn::DTArray *zgrid);
+struct QSPOptions {
+  int NS;
+  int NT;
+  string filename;
+  double S1_max;
+  double S1_min;
+  double T1_max;
+  double T1_min;
+  string T1_name;
+  string S1_name;
+};
+
+struct QSPData {
+  TArrayn::DTArray *u;
+  TArrayn::DTArray *v;
+  TArrayn::DTArray *w;
+  TArrayn::DTArray *temp;
+  TArrayn::DTArray *rho;
+  TArrayn::DTArray *salinity;
+  TArrayn::DTArray *custom_T1;
+  TArrayn::DTArray *custom_S1;
+  TArrayn::DTArray *xgrid;
+  TArrayn::DTArray *ygrid;
+  TArrayn::DTArray *zgrid;
+  int Nx;
+  int Ny;
+  int Nz;
+  int plotnum;
+  bool mapped;
+};
+
+void QSPCount(QSPOptions qsp_options, QSPData qsp_data);
 
 // Equation of state for seawater, polynomial fit from
 // Brydon, Sun, Bleck (1999) (JGR)
