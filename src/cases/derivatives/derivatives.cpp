@@ -263,19 +263,19 @@ class userControl : public BaseCase {
                     // Store Temperature in T, it is free
                     init_tracer_restart("t",u);
                     compute_baroclinic_vort(deriv_var, *temp4, u, gradient_op, grid_type, v_exist);
-                    deriv_var=deriv_var*g;
+                    deriv_var=deriv_var*g/rho_0;
                     write_array(deriv_var,"bar",plotnum);
                     if (master()) fprintf(stdout,"Completed the write for bar.%d\n",plotnum);
 
                     if ( v_exist ) {
                        compute_baroclinic_vort_x(deriv_var, u, gradient_op, grid_type);
-                       deriv_var=deriv_var*g;
+                       deriv_var=deriv_var*g/rho_0;
                        write_array(deriv_var,"barx",plotnum);
                        if (master()) fprintf(stdout,"Completed the write for barx.%d\n",plotnum);
                     }
 
                     compute_baroclinic_vort_y(deriv_var, u, gradient_op, grid_type);
-                    deriv_var=deriv_var*g;
+                    deriv_var=deriv_var*g/rho_0;
                     write_array(deriv_var,"bary",plotnum);
                     if (master()) fprintf(stdout,"Completed the write for bary.%d\n",plotnum);
 
