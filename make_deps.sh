@@ -75,11 +75,10 @@ else
 	fi
 	(tar -xzvf blitz_1.0.2.tar.gz > /dev/null) || (echo "Untar of Blitz FAILED"; exit 1);
 	pushd blitz-1.0.2
-	(autoreconf -vif && ./configure --prefix="$CWD" --disable-fortran "${BLITZ_OPTIONS}" > /dev/null) && \
-		(make lib > /dev/null) && \
-		pushd blitz && (make install > /dev/null) && popd  && \
-		pushd lib && (make install > /dev/null) && popd  && \
-		pushd random && (make install > /dev/null) && popd && \
+   mkdir build && pushd build && \
+      (cmake .. -DCMAKE_INSTALL_PREFIX="$CWD" > /dev/null) && \
+      (make -j4 > /dev/null) && \
+      (make install > /dev/null) && popd
 	popd 
    if [ $? -ne 0 ]; then
       echo "Could not compile/install Blitz"; exit 1
