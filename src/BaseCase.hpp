@@ -11,7 +11,7 @@
 using namespace TArrayn;
 using namespace NSIntegrator;
 using blitz::Array;
-using std::vector;
+using namespace std;
 
 // Possible input data types
 static enum input_types {

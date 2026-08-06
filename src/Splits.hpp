@@ -11,7 +11,9 @@
 #include <blitz/array.h>
 #include <mpi.h>
 
-using namespace std;
+using std::vector;
+using std::string;
+using std::complex;
 
 vector<int> get_extents(int size, int numprocs);
 vector<int> get_lbounds(int size, int numprocs);
