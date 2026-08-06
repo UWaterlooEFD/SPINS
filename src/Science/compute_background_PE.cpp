@@ -13,6 +13,7 @@ using blitz::cos;
 using namespace TArrayn;
 using namespace NSIntegrator;
 using namespace Transformer;
+using namespace std;
 
 bool compare_pairs( pair<double, double> a, pair<double, double> b ) {
 	return a.first < b.first;

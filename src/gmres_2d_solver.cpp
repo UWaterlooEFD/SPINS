@@ -16,6 +16,8 @@ using namespace TArrayn;
 using std::vector;
 using std::set;
 using blitz::Range;
+using std::max;
+using std::min;
 
 #define SYNC(__x__) { int myrank, nproc; MPI_Comm_size(my_comm,&nproc); MPI_Comm_rank(my_comm,&myrank); \
                      if (master(my_comm)) fprintf(stderr,"SYNC: %s:%d\n",__FILE__,__LINE__); \

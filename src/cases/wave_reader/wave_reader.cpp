@@ -53,6 +53,7 @@ double dt_max;                  // maximum time step (s)
 bool restarting;                // are you restarting?
 double initial_time;            // initial start time of simulation
 int restart_sequence;           // output number to restart from
+bool restart_2d;
 
 // Dump parameters
 bool restart_from_dump;         // restarting from dump?
@@ -191,7 +192,7 @@ class userControl : public BaseCase {
                 // FULL types can be passed directly to init_field
                 init_field("u", u_filename, u, input_data_types);
                 init_field("w", w_filename, w, input_data_types);
-                if (Ny > 1 || rot_f != 0) {
+                if (!restart_2d) {
                     init_field("v", v_filename, v, input_data_types);
                 } else {
                     v = 0*ii + 0*jj + 0*kk;
@@ -572,6 +573,7 @@ int main(int argc, char ** argv) {
     add_option("restart",&restarting,false,"Restart from prior output time.");
     add_option("restart_time",&initial_time,0.0,"Time to restart from");
     add_option("restart_sequence",&restart_sequence,-1,"Sequence number to restart from");
+    add_option("restart_2d", &restart_2d, false, "True if we are restarting from 2D output");
 
     option_category("Dumping options");
     add_option("restart_from_dump",&restart_from_dump,false,"If restart from dump");
