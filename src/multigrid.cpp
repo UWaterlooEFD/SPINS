@@ -20,8 +20,6 @@ using namespace std;
 
 /* Prototype the DGESV LAPACK routine */
 extern "C" {
-   void dgesv_(int * n, int * nrhs, double * a, int * lda, 
-         int * ipiv, double * b, int * ldb, int * info);
    void dgbsv_(int * n, int * kl, int * ku, int * nrhs,
          double * ab, int * ldab, int * ipiv, double * b,
          int * ldb, int * info);
@@ -59,48 +57,24 @@ void get_fd_operator(Array<double,1> & x, Array<double,2> & Dx, Array<double,2> 
    Dxx(lbound,0) = Dxx(lbound,1) = Dxx(lbound,2) = 0;
    Dxx(ubound,0) = Dxx(ubound,1) = Dxx(ubound,2) = 0;
    
-   /* Now, loop over interior points */
-   /* Matrix operator to solve for FD coefficients */
-   Array<double,2> M(3,3,blitz::columnMajorArray);
-   /* "vector" for Dx, Dxx coefficients.  Input is [0 1 0;0 0 1] and output is
-      the coefficients for Dx/Dxx */
-   Array<double,2> vec(3,2,blitz::columnMajorArray);
-   int IPIV[3]; // Pivot array for DGESV
-   /* Other constants for DGESV */
-   int N=3, NRHS=2, LDA=3, LDB=3, INFO=-1;
-   for (int j = lbound+1; j<= ubound-1; j++) {
-      /* First, build M using a Taylor series approach.  We'll define
-         the constant, dx, and dxx terms via differences on x, and then
-         solve for the weights that give [0 1 0] for Dx and [0 0 1] for Dxx */
-      /* Left and right spacings */
-      double xl = x(j-1)-x(j);
-      double xr = x(j+1)-x(j);
-      /* Now, build the Taylor series about x=x(j), and evaluate
-         at j-1, j, and j+1 */
-      /* f(x) = f(x_j) + f_x(x_j)*(x-x_j) + f_xx(x_j)*(x-x_j)^2/2 */
-      /* First row of matrix -- constant terms */
-      M(0,0) = M(0,1) = M(0,2) = 1;
-      /* Second row -- Dx term */
-      M(1,0) = xl; M(1,1) = 0; M(1,2) = xr;
-      /* Third row, Dxx term */
-      M(2,0) = xl*xl/2, M(2,1) = 0; M(2,2) = xr*xr/2;
+   /* Use a closed form solution to populate the rest of Dx and Dxx */
+   const int start_index = lbound+1;
+   const int end_index = ubound-1;
+   const int total_points = end_index - start_index + 1;
+   for (int j = start_index; j <= ubound - 1; j++) {
+      int idx = j - start_index;
+      double h1_j = x(j) - x(j-1);
+      double h2_j = x(j+1) - x(j);
+      double h_sum_j = h1_j + h2_j;
+      double h_prod_j = h1_j * h2_j;
 
-      /* Now, the rhs vector */
-      vec(0,0) = vec(0,1) = 0;
-      vec(1,0) = 1; vec(1,1) = 0;
-      vec(2,0) = 0; vec(2,1) = 1;
+      Dx(j, 0) = -h2_j / (h1_j * h_sum_j);
+      Dx(j, 1) = (h2_j - h1_j) / h_prod_j;
+      Dx(j, 2) =  h1_j / (h2_j * h_sum_j);
 
-      /* Now, M\vec, AKA an ugly DGESV call */
-//      std::cerr << M;
-      dgesv_(&N, &NRHS, M.data(), &LDA, IPIV, vec.data(), &LDB, &INFO);
-      assert(INFO == 0);
-
-//      std::cerr << vec;
-
-      /* And assign results to Dx/Dxx */
-      Dx(j,0) = vec(0,0); Dxx(j,0) = vec(0,1);
-      Dx(j,1) = vec(1,0); Dxx(j,1) = vec(1,1);
-      Dx(j,2) = vec(2,0); Dxx(j,2) = vec(2,1);
+      Dxx(j, 0) =  2.0 / (h1_j * h_sum_j);
+      Dxx(j, 1) = -2.0 / h_prod_j;
+      Dxx(j, 2) =  2.0 / (h2_j * h_sum_j);
    }
 }
 
@@ -842,8 +816,8 @@ void MG_Solver::apply_operator(Array<double,2> & u, Array<double,2> & f) {
       special tender love and care.  However, the interior is relatively
       easy */
 
-   blitz::firstIndex ii; blitz::secondIndex jj;
    for (int i = local_x_lbound+1; i <= local_x_ubound-1; i++) {
+      #pragma GCC ivdep
       for (int j = 1; j <= size_z-2; j++) {
          f(i,j) = 
             u(i,j)*(helm_parameter + 
@@ -868,33 +842,28 @@ void MG_Solver::apply_operator(Array<double,2> & u, Array<double,2> & f) {
                   u(i+1,j+1)*Dx(i,2)*Dz(j,2));
       }
    }
+
    /* Top and bottom BCs */
+   #pragma GCC ivdep
    for (int i = local_x_lbound+1; i <= local_x_ubound - 1; i++) {
       int j = 0;
       f(i,j) = u(i,j)*(u_bot(i) + ux_bot(i)*Dx(i,1) + uz_bot(i)*Dz(j,1)) +
             u(i-1,j)*ux_bot(i)*Dx(i,0) + u(i+1,j)*ux_bot(i)*Dx(i,2) +
             u(i,j+1)*uz_bot(i)*Dz(j,2);
-//      fprintf(stderr,"Bottom %d\n %g = %g*(%g + %g*%g + %g*%g) + %g*%g*%g + %g*%g*%g + %g*%g*%g\n",i,
-//            f(i,j),u(i,j),u_bot(i),ux_bot(i),Dx(i,1),uz_bot(i),Dz(j,1),
-//            u(i-1,j),ux_bot(i),Dx(i,0),u(i+1,j),ux_bot(i),Dx(i,2),
-//            u(i,j+1),uz_bot(i),Dz(j,2));
-//      fprintf(stderr,"Bottom %d %gL %gH %gR %gU = %g\n    (%g %g %g)\n",
-//            i,u(i-1,j),u(i,j),u(i+1,j),u(i,j+1),f(i,j),
-//            u_bot(i),ux_bot(i),uz_bot(i));;
-//      fprintf(stderr,"(%d,%d) stencil:\n",i,j);
-//      fprintf(stderr,"%g u, %g ux, %g uz\n",u_bot(i),ux_bot(i),uz_bot(i));
-//      fprintf(stderr,"%g left %g here %g right %g up\n",u(i-1,j),u(i,j),u(i+1,j),u(i,j+1));
-//      fprintf(stderr,"[%g %g %g]x [-- %g %g]z\n",Dx(i,0),Dx(i,1),Dx(i,2),Dz(j,1),Dz(j,2));
-//      MPI_Finalize(); exit(1);
-      j=size_z-1;
+   }
+   #pragma GCC ivdep
+   for (int i = local_x_lbound+1; i <= local_x_ubound - 1; i++) {
+      int j=size_z-1;
       f(i,j) = u(i,j)*(u_top(i) + ux_top(i)*Dx(i,1) + uz_top(i)*Dz(j,1)) +
             u(i-1,j)*ux_top(i)*Dx(i,0) + u(i+1,j)*ux_top(i)*Dx(i,2) +
             u(i,j-1)*uz_top(i)*Dz(j,0);
    }
+
    /* Now, handle non-boundary interiors */
    /* Left boundary */
    if (symmetry_type != SYM_NONE || (myrank != 0)) {
       int i = local_x_lbound;
+      #pragma GCC ivdep
       for (int j = 1; j <= size_z-2; j++) {
          f(i,j) = 
             u(i,j)*(helm_parameter + 
@@ -931,6 +900,7 @@ void MG_Solver::apply_operator(Array<double,2> & u, Array<double,2> & f) {
    /* Right boundary */
    if (symmetry_type != SYM_NONE || (myrank != nproc-1)) {
       int i = local_x_ubound;
+      #pragma GCC ivdep
       for (int j = 1; j <= size_z-2; j++) {
          f(i,j) = 
             u(i,j)*(helm_parameter + 
@@ -971,6 +941,7 @@ void MG_Solver::apply_operator(Array<double,2> & u, Array<double,2> & f) {
    if (symmetry_type == SYM_NONE) {
       if (local_x_lbound == 0) {
          int i = 0;
+         #pragma GCC ivdep
          for (int j = 1; j <= size_z-2; j++) {
             f(i,j) = u(i,j)*(u_left(j) + ux_left(j)*Dx(i,1) + uz_left(j)*Dz(j,1)) +
                u(i,j-1)*uz_left(j)*Dz(j,0) + u(i,j+1)*uz_left(j)*Dz(j,2) +
@@ -998,6 +969,7 @@ void MG_Solver::apply_operator(Array<double,2> & u, Array<double,2> & f) {
       if (local_x_ubound == size_x-1) {
          int i = size_x-1;
 
+         #pragma GCC ivdep
          for (int j = 1; j <= size_z-2; j++) {
             f(i,j) = u(i,j)*(u_right(j) + ux_right(j)*Dx(i,1) + uz_right(j)*Dz(j,1)) +
                u(i,j-1)*uz_right(j)*Dz(j,0) + u(i,j+1)*uz_right(j)*Dz(j,2) +
@@ -1122,18 +1094,24 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
             (i != 0 && i != size_x - 1)) { // Away from possible BC issues
          /* Store coefficients for u, uz, and uzz */
 //         fprintf(stdout,"Interior line\n");
+         #pragma GCC ivdep
          for (int j = 1; j < size_z-1; j++) {
             // The uzz term can be copied directly over
             uzz_coef(j) = uzz(i,j); 
-
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             // The uz term gets its direct contribution plus one from
             // the Dx*Dz term.
             uz_coef(j) = uz(i,j) + Dxh*uxz(i,j);
-            
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             // The u term gets the normal helmholtz parameter plus
             // the centre part of each of the Dx/Dxx terms
             u_coef(j) = helm_parameter+Dxxh*uxx(i,j)+Dxh*ux(i,j);
          }
+
          // Bottom boundary, Dirichlet term
          bc_bot = u_bot(i)+ux_bot(i)*Dxh;
          bc_top = u_top(i)+ux_top(i)*Dxh;
@@ -1149,9 +1127,13 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
          /* As such, there is no uzz term */
 //         fprintf(stderr,"Left, no symmetry\n");
          uzz_coef = 0;
+         #pragma GCC ivdep
          for (int j = 1; j < size_z-1; j++) {
             /* And the uz term is given from the left BC */
             uz_coef(j) = uz_left(j);
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             /* And the u term is given from a combination
                of the ux and u BC terms */
             u_coef(j) = u_left(j) + ux_left(j)*Dx(i,1);
@@ -1164,10 +1146,17 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
          bc_z_top = uz_top(i);
       } else if (i == size_x-1 && symmetry_type == SYM_NONE) {
 //         fprintf(stdout,"Right, no symmetry\n");
+         /* Right boundary with no symmetry */
+         /* As such, there is no uzz term */
          uzz_coef = 0;
+         
+         #pragma GCC ivdep
          for (int j = 1; j < size_z-1; j++) {
             /* And the uz term is given from the left BC */
             uz_coef(j) = uz_right(j);
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             /* And the u term is given from a combination
                of the ux and u BC terms */
             u_coef(j) = u_right(j) + ux_right(j)*Dx(i,1);
@@ -1219,11 +1208,20 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
       f_line = f(i,Range::all()); // Copy the residual
 
       /* Store coefficients for u, uz, and uzz */
+      #pragma GCC ivdep
       for (int j = 1; j < size_z-1; j++) {
          uzz_coef(j) = uzz(i,j); 
+      }
+      #pragma GCC ivdep
+      for (int j = 1; j < size_z-1; j++) {
          uz_coef(j) = uz(i,j) + Dx(i,1)*uxz(i,j);
+      }
+      #pragma GCC ivdep
+      for (int j = 1; j < size_z-1; j++) {
          u_coef(j) = helm_parameter+Dxx(i,1)*uxx(i,j)+Dx(i,1)*ux(i,j);
-
+      }
+      #pragma GCC ivdep
+      for (int j = 1; j < size_z-1; j++) {
          // And modify the residual to take into account the
          // left and right neighbours, which we've already computed
          f_line(j) = f_line(j) -
@@ -1285,14 +1283,21 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
       if (symmetry_type == SYM_NONE) {
 //         fprintf(stdout,"... with no symmetry\n");
          // BC
+         
          uzz_coef = 0;
+         #pragma GCC ivdep
          for (int j = 1; j < size_z-1; j++) {
             /* And the uz term is given from the left BC */
             uz_coef(j) = uz_right(j);
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             /* And the u term is given from a combination
                of the ux and u BC terms */
             u_coef(j) = u_right(j) + ux_right(j)*Dx(i,1);
-
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             f_line(j) = f_line(j) - ux_right(j)*
                         (Dx(i,0)*u(i-1,j));
          }
@@ -1308,13 +1313,22 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
       else { // Even or odd symmetry
          int SYM = (symmetry_type == SYM_EVEN ? 1 : -1);
 //         fprintf(stderr,"... with even/odd symmetry\n");
+         #pragma GCC ivdep
          for (int j = 1; j < size_z-1; j++) {
             uzz_coef(j) = uzz(i,j); 
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             uz_coef(j) = uz(i,j) + (Dx(i,1)+SYM*Dx(i,2))*uxz(i,j);
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             u_coef(j) = helm_parameter+
                         (Dxx(i,1)+SYM*Dxx(i,2))*uxx(i,j)+
                         (Dx(i,1)+SYM*Dx(i,2))*ux(i,j);
-
+         }
+         #pragma GCC ivdep
+         for (int j = 1; j < size_z-1; j++) {
             // And modify the residual to take into account the
             // left and right neighbours, which we've already computed
             f_line(j) = f_line(j) -
@@ -1334,11 +1348,20 @@ void MG_Solver::do_redblack(blitz::Array<double,2> & f, blitz::Array<double,2> &
    } else {
 //      fprintf(stdout,"... as an interior point\n");
       /* Interior point or periodic symmetry */
+      #pragma GCC ivdep
       for (int j = 1; j < size_z-1; j++) {
          uzz_coef(j) = uzz(i,j); 
+      }
+      #pragma GCC ivdep
+      for (int j = 1; j < size_z-1; j++) {
          uz_coef(j) = uz(i,j) + Dx(i,1)*uxz(i,j);
+      }
+      #pragma GCC ivdep
+      for (int j = 1; j < size_z-1; j++) {
          u_coef(j) = helm_parameter+Dxx(i,1)*uxx(i,j)+Dx(i,1)*ux(i,j);
-
+      }
+      #pragma GCC ivdep
+      for (int j = 1; j < size_z-1; j++) {
          // And modify the residual to take into account the
          // left and right neighbours, which we've already computed
          f_line(j) = f_line(j) -
