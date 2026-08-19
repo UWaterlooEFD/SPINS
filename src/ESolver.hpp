@@ -53,75 +53,66 @@
 #include "grad.hpp"
 
 namespace ESolver {
-   using TArrayn::DTArray;
-   using TArrayn::CTArray;
-   using namespace Transformer;
-   
-   class ElipSolver {
-      /* ESolver 0.1 -- triply-periodic FFT, solving:
+    using TArrayn::DTArray;
+    using TArrayn::CTArray;
+    using namespace Transformer;
+
+    class ElipSolver {
+        /* ESolver 0.1 -- triply-periodic FFT, solving:
          Lap(u) - M*u = f(x,y,z) */
-      /* ElipSolver 0.2 -- adding sin/cos expansions */
-      
+        /* ElipSolver 0.2 -- adding sin/cos expansions */
+
       public:
-         /* The mechanics of real/spectral transformation is handled by the
+        /* The mechanics of real/spectral transformation is handled by the
             TransWrapper class.  This means that ElipSolver doesn't have to
             directly handle temporary arrays, nor does it have to calculate
             wavenumbers (and normalization factors) by itself. */
-         /* Note that the gradient operator is now specified.  We can't really
+        /* Note that the gradient operator is now specified.  We can't really
             leverage the derivatives in it since we don't -take- derivatives
             over the entire field, but we can use the jacobian info inside
             for our calculations.  (a 3D multigrid -could- use grad directly,
             but we're not writing that now.) */
-         ElipSolver(double M,TransWrapper * spec_space, TArrayn::Grad * in_grad);
-         ~ElipSolver(); // Destructor
-         /* Solve the Helmholtz/Poisson problem with the given rhs, storage
+        ElipSolver(double M, TransWrapper *spec_space, TArrayn::Grad *in_grad);
+        ~ElipSolver(); // Destructor
+        /* Solve the Helmholtz/Poisson problem with the given rhs, storage
             in output. */
-         void solve(DTArray & rhs, DTArray & output,
-               S_EXP type_x=FOURIER, S_EXP type_y=FOURIER, 
-               S_EXP type_z=FOURIER, double zbc_a=0, double zbc_b = 0,
-               double xbc_a=0, double xbc_b=0,
-               double ybc_a=0, double ybc_b=0);
-         /* For timestepping: reset the Helmholtz parameter */
-         void change_m(double M);
-      private:
-         double M; // Helmholtz parameter 
-         TArrayn::Grad * gradient;
-         S_EXP t_types[3]; // Transform types
+        void solve(DTArray &rhs, DTArray &output, S_EXP type_x = FOURIER, S_EXP type_y = FOURIER, S_EXP type_z = FOURIER, double zbc_a = 0, double zbc_b = 0, double xbc_a = 0, double xbc_b = 0, double ybc_a = 0, double ybc_b = 0);
+        /* For timestepping: reset the Helmholtz parameter */
+        void change_m(double M);
 
-         /* Specialization of solve to the case when all three
+      private:
+        double         M; // Helmholtz parameter
+        TArrayn::Grad *gradient;
+        S_EXP          t_types[3]; // Transform types
+
+        /* Specialization of solve to the case when all three
             dimensions are non-mapped trig expansions.  The
             derivatives become algebraic after transform, meaning
             no GMRES required */
-         void threespec_solve(DTArray & rhs, DTArray & output,
-               S_EXP type_x, S_EXP type_y, S_EXP type_z);
+        void threespec_solve(DTArray &rhs, DTArray &output, S_EXP type_x, S_EXP type_y, S_EXP type_z);
 
-         /* Specialization for one Chebyshev dimension (vertical),
+        /* Specialization for one Chebyshev dimension (vertical),
             including (identical) BC types for the top and bottom */
-         void chebz_solve(DTArray & rhs, DTArray & output,
-               S_EXP type_x, S_EXP type_y, double zbc_a, double zbc_b);
+        void chebz_solve(DTArray &rhs, DTArray &output, S_EXP type_x, S_EXP type_y, double zbc_a, double zbc_b);
 
-         /* Specialization for the 2D GMRES/Multigrid solve,
+        /* Specialization for the 2D GMRES/Multigrid solve,
             with identical BCs at all solid interfaces */
-         void twodeemg_solve(DTArray & rhs, DTArray & output,
-               S_EXP type_x, S_EXP type_y, double zbc_a, double zbc_b, double xbc_a, double xbc_b);
+        void twodeemg_solve(DTArray &rhs, DTArray &output, S_EXP type_x, S_EXP type_y, double zbc_a, double zbc_b, double xbc_a, double xbc_b);
 
-         TransWrapper * spec_transform;
+        TransWrapper *spec_transform;
 
-         // Data members for the 1D (z) Chebyshev case, which requires
-         // a parallel transpose for data ordering
-         Transposer<complex<double> > * cTransposer;
-         Transposer<double> * rTransposer;
-         DTArray * rtransyz;
-         CTArray * ctransyz;
+        // Data members for the 1D (z) Chebyshev case, which requires
+        // a parallel transpose for data ordering
+        Transposer<complex<double>> *cTransposer;
+        Transposer<double>          *rTransposer;
+        DTArray                     *rtransyz;
+        CTArray                     *ctransyz;
 
-         // Data members for the 2D multigrid solve, which operates on a
-         // Nx1xM 3D array
-         DTArray * twod_u, * twod_f;
-         
+        // Data members for the 2D multigrid solve, which operates on a
+        // Nx1xM 3D array
+        DTArray *twod_u, *twod_f;
+    };
 
-   };
-
-}  // End namespace
-
+} // namespace ESolver
 
 #endif // ESOLVER_HPP

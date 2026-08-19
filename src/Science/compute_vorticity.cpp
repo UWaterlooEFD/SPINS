@@ -14,10 +14,7 @@ using namespace TArrayn;
 using namespace NSIntegrator;
 using namespace Transformer;
 
-
-void compute_vorticity(TArrayn::DTArray & vortx, TArrayn::DTArray & vorty, TArrayn::DTArray & vortz,
-        TArrayn::DTArray & u, TArrayn::DTArray & v, TArrayn::DTArray & w,
-        TArrayn::Grad * gradient_op, const string * grid_type) {
+void compute_vorticity(TArrayn::DTArray &vortx, TArrayn::DTArray &vorty, TArrayn::DTArray &vortz, TArrayn::DTArray &u, TArrayn::DTArray &v, TArrayn::DTArray &w, TArrayn::Grad *gradient_op, const string *grid_type) {
     // compute each component
     compute_vort_x(vortx, v, w, gradient_op, grid_type);
     compute_vort_y(vorty, u, w, gradient_op, grid_type);

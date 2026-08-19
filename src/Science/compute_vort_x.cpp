@@ -13,26 +13,24 @@ using blitz::cos;
 using namespace TArrayn;
 using namespace NSIntegrator;
 using namespace Transformer;
-   
+
 // X-component of vorticity
-void compute_vort_x(TArrayn::DTArray & vortx, TArrayn::DTArray & v, TArrayn::DTArray & w,
-        TArrayn::Grad * gradient_op, const string * grid_type) {
+void compute_vort_x(TArrayn::DTArray &vortx, TArrayn::DTArray &v, TArrayn::DTArray &w, TArrayn::Grad *gradient_op, const string *grid_type) {
     // Set-up
     S_EXP expan[3];
     assert(gradient_op);
 
     // Setup for dv/dz
     find_expansion(grid_type, expan, "v");
-    gradient_op->setup_array(&v,expan[0],expan[1],expan[2]);
+    gradient_op->setup_array(&v, expan[0], expan[1], expan[2]);
     // get dv/dz
-    gradient_op->get_dz(&vortx,false);
+    gradient_op->get_dz(&vortx, false);
     // Invert to get the negative
-    vortx = (-1)*vortx;
+    vortx = (-1) * vortx;
 
     // Setup for dw/dy
     find_expansion(grid_type, expan, "w");
-    gradient_op->setup_array(&w,expan[0],expan[1],expan[2]);
+    gradient_op->setup_array(&w, expan[0], expan[1], expan[2]);
     // get dw/dy, and add to vortx
-    gradient_op->get_dy(&vortx,true);
+    gradient_op->get_dy(&vortx, true);
 }
-
