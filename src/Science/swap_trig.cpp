@@ -15,16 +15,17 @@ using namespace NSIntegrator;
 using namespace Transformer;
 
 // function to switch trig functions
-S_EXP swap_trig( S_EXP the_exp ) {
-    if ( the_exp == SINE ) {
-        return COSINE; }
-    else if ( the_exp == COSINE ) {
-        return SINE; }
-    else if ( the_exp == FOURIER ) {
-        return FOURIER; }
-    else if ( the_exp == CHEBY ) {
-        return CHEBY; }
-    else {
-        MPI_Finalize(); exit(1); // stop
+S_EXP swap_trig(S_EXP the_exp) {
+    if (the_exp == SINE) {
+        return COSINE;
+    } else if (the_exp == COSINE) {
+        return SINE;
+    } else if (the_exp == FOURIER) {
+        return FOURIER;
+    } else if (the_exp == CHEBY) {
+        return CHEBY;
+    } else {
+        MPI_Finalize();
+        exit(1); // stop
     }
 }
