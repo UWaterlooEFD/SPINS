@@ -75,7 +75,7 @@ else
 	fi
 	(tar -xzvf blitz_1.0.2.tar.gz > /dev/null) || (echo "Untar of Blitz FAILED"; exit 1);
 	pushd blitz-1.0.2
-   mkdir build && pushd build && \
+   mkdir -p build && pushd build && \
       (cmake .. -DCMAKE_INSTALL_PREFIX="$CWD" > /dev/null) && \
       (make -j4 > /dev/null) && \
       (make install > /dev/null) && popd
