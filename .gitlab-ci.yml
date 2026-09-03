@@ -28,7 +28,7 @@ build-and-test-job:       # This job runs in the build stage, which runs first.
   script: |
     (find . -regextype egrep -iregex ".*\.[ch]p?p?" | xargs -I % clang-format -Werror --dry-run -ferror-limit=1 %) || (echo "Code has not been formatted. Install 'clang-format' to your development environment and run ./format.sh to format according to the SPINS project style rules. Exiting..." && exit 1)
     cd src/test
-    mkdir build
+    mkdir -p build
     cmake -S . -B build
     cd build
     cmake --build . -j8
@@ -39,3 +39,9 @@ build-and-test-job:       # This job runs in the build stage, which runs first.
     cd ../src
     # FIXME: 'nleos' function has an incompatible signature with these filtered cases.
     find cases -name "*.cpp" | grep -vE '/Archive/|jmd_test|salt_temp|spinscase.cpp$' | sed -r 's/\.cpp/.x/' | xargs make -j4
+    # Test CMake builds
+    cd ..
+    mkdir -p build
+    cd build
+    cmake -S .. -B .
+    cmake --build . -j8

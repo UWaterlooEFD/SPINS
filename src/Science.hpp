@@ -14,12 +14,10 @@ extern Array<double, 1> _quadw_x, _quadw_y, _quadw_z;
 // Marek's Overturning Diagnostic
 blitz::Array<double, 3> overturning_2d(blitz::Array<double, 3> const &rho, blitz::Array<double, 1> const &zgrid, TArrayn::Dimension reduce = TArrayn::thirdDim);
 
-// Read in a 2D file and interpret it as a 2D slice of a 3D array, for
-// initialization with read-in-data from a program like MATLAB
-void read_2d_slice(blitz::Array<double, 3> &fillme, const char *filename, int Nx, int Ny);
-
-void read_2d_restart(blitz::Array<double, 3> &fillme, const char *filename, int Nx, int Ny);
-
+extern "C" {
+    void read_2d_slice(Array<double, 3> &, const char *, int, int);
+    void read_2d_restart(Array<double, 3> &fillme, const char *filename, int Nx, int Ny);
+}
 // Vorticity
 void compute_vort_x(TArrayn::DTArray &vortx, TArrayn::DTArray &v, TArrayn::DTArray &w, TArrayn::Grad *gradient_op, const string *grid_type);
 void compute_vort_y(TArrayn::DTArray &vorty, TArrayn::DTArray &u, TArrayn::DTArray &w, TArrayn::Grad *gradient_op, const string *grid_type);

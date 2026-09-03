@@ -2,6 +2,7 @@
 #include "Science.hpp"
 #include "NSIntegrator.hpp"
 #include "TArray.hpp"
+#include "Split_reader.hpp"
 #include <blitz/array.h>
 #include <fstream>
 
@@ -10,10 +11,6 @@ using namespace NSIntegrator;
 using blitz::Array;
 using std::vector;
 
-/* Call the source code writing function in the constructor */
-extern "C" {
-    void WriteCaseFileSource(void);
-}
 BaseCase::BaseCase(void) {
     if (master()) WriteCaseFileSource();
 
