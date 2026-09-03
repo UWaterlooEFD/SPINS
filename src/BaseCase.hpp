@@ -179,6 +179,10 @@ class BaseCase {
     void stresses_bottom(TArrayn::DTArray &u, TArrayn::DTArray &v, TArrayn::DTArray &w, TArrayn::DTArray &Hprime, TArrayn::DTArray &temp, TArrayn::Grad *gradient_op, const string *grid_type, const double mu, double time, int itercount, bool restarting);
 };
 
+extern "C" {
+    void WriteCaseFileSource(void);
+}
+
 #include "BaseCase_impl.cc" // Include the implementation of the add_diagnostic template
 
 // Note explicitly instantiated add_diagnostic template functions
