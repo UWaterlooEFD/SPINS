@@ -790,7 +790,7 @@ namespace NSIntegrator {
          if (tx == NO_SLIP) {
             blitz::firstIndex ii; blitz::secondIndex jj; blitz::thirdIndex kk;
             double pin = M_PI/(szx-1);
-            timex = (Lx/2)*min(abs((pin*sin(kk*pin)+pin*pin/2*cos(kk*pin))/(1e-8 + abs(us[0](ii,jj,kk)))));
+            timex = (Lx/2)*min(abs((pin*sin(ii*pin)+pin*pin/2*cos(ii*pin))/(1e-8 + abs(us[0](ii,jj,kk)))));
          } else {
             timex = (Lx/szx) / (1e-6 + max(abs(us[0])));
          }
