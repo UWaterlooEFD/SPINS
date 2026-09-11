@@ -520,7 +520,7 @@ namespace TArrayn {
 
             double strength_xy  = -log((low_level) / (high_kl + 1e-100));
             double strength_xz  = -log((low_level) / (high_km + 1e-100));
-            double strength_yz  = -log((low_level) / (high_km + 1e-100));
+            double strength_yz  = -log((low_level) / (high_lm + 1e-100));
             double strength_xyz = -log((low_level) / (high_klm + 1e-100));
 
             /* If the corners are worse (larger) than the middles, smoothly
