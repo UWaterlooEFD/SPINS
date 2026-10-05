@@ -343,7 +343,9 @@ class GMRES_Solver {
                  * returns the true least-squares solution. The dgelsd workspace
                  * query above is kept because its lwork bound bounds dgels'
                  * required work; the SVD output arrays are no longer consumed. */
-                dgels_("N", &M, &N, &NRHS, hess_copy.data(), &LDA, rhs_vec.data(), &LDB, lapack_workspace, &lwork_size, &INFO);
+
+                char transp = 'N';
+                dgels_(&transp, &M, &N, &NRHS, hess_copy.data(), &LDA, rhs_vec.data(), &LDB, lapack_workspace, &lwork_size, &INFO);
                 //               fprintf(stderr,"%s:%d RANK %d\n",__FILE__,__LINE__,RANK); fflush(stderr);
                 /* rhs_vec.data() contains the answer and remainder */
                 //               std::cerr << svd_vec;
