@@ -10,6 +10,7 @@ set (tests_TARGETS
   test_mg
 #  test_min_ns  # -- Broken.
   test_ode   
+  test_poisson1d
 #  test_par  # -- Broken.
 #  test_pesolve  # -- Broken.
 #  test_pheat  # -- Broken.

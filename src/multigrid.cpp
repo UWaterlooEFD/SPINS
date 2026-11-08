@@ -528,13 +528,20 @@ void line_solve(Array<double, 1> &u, Array<double, 1> &f, Array<double, 1> &A, A
     timing_push("line_solve");
 
     // Build the band matrix itself, re-using the LAPACK formulation
-    blitz::firstIndex       ii;
-    blitz::Range            all = Range::all();
-    static Array<double, 1> an(u.extent(firstDim)), bn(u.extent(firstDim)), cn(u.extent(firstDim));
-    int                     top = u.ubound(firstDim);
-    an                          = 0;
-    bn                          = 0;
-    cn                          = 0;
+    blitz::firstIndex ii;
+    blitz::Range      all = Range::all();
+    // Work arrays kept between calls; resized when the line length changes
+    // (a program that solves problems with different Nz would otherwise write past their ends)
+    static Array<double, 1> an, bn, cn;
+    if (an.extent(firstDim) != u.extent(firstDim)) {
+        an.resize(u.extent(firstDim));
+        bn.resize(u.extent(firstDim));
+        cn.resize(u.extent(firstDim));
+    }
+    int top = u.ubound(firstDim);
+    an      = 0;
+    bn      = 0;
+    cn      = 0;
     /* Set the band matrix based on our input parameters */
     // Main diagonal
     bn(all) = A * Dzz(all, 1) + B * Dz(all, 1) + C;

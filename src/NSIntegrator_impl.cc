@@ -202,6 +202,8 @@ namespace NSIntegrator {
 
 //         fprintf(stderr,"%g %g %g\n",pvmax(us_forcing[0]),pvmax(vs_forcing[0]),pvmax(ws_forcing[0]));
 
+         constexpr size_t X_LEFT_ENDPOINT = 0;
+         const size_t X_SZ = szx;
          /* Advect tracers.  Nothing fancy here. */
          for (unsigned int i = 0; i < tracers.size(); i++) {
             /* Curioser and curioser; a tracer does not fit neatly into the
@@ -233,10 +235,10 @@ namespace NSIntegrator {
 //            fprintf(stderr,"Before BC copy");
 //            cerr << (*tracers_forcing[i])[0];
             if (tx == NO_SLIP && usercode->tracer_bc_forcing() && t_diffusivity[i] != 0) {
-               if (local_lbounds(1) == 0) { // We have the left point
+               if (local_lbounds(0) == X_LEFT_ENDPOINT) {
                   left_bc = (*tracers_forcing[i])[0](0,blitz::Range::all(),blitz::Range::all());
                }
-               if (local_lbounds(1) + local_extents(1) == (szx - 1)) { // And the right point
+               if (local_lbounds(0) + local_extents(0) == X_SZ) {
                   right_bc = (*tracers_forcing[i])[0](szx-1,blitz::Range::all(),blitz::Range::all());
                }
             }
@@ -313,10 +315,10 @@ namespace NSIntegrator {
                   }
                } else {
                   if (tx == NO_SLIP) {
-                     if (local_lbounds(1) == 0) {
+                     if (local_lbounds(0) == 0) {
                         (*tracers[i])[1](0,blitz::Range::all(),blitz::Range::all()) = left_bc;
                      }
-                     if (local_lbounds(1) + local_extents(1) == (szx - 1)) {
+                     if (local_lbounds(0) + local_extents(0) == szx) {
                         (*tracers[i])[1](szx-1,blitz::Range::all(),blitz::Range::all()) = right_bc;
                      }
                   }

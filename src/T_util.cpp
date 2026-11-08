@@ -261,12 +261,14 @@ namespace TArrayn {
             D(end) = 0;
             D(end-1) = (end-1)*C(end)
             D(z) = D(z+2) + 2*K(z+1)*C(z+1)
+         (1-based indices, as in MATLAB). The DCT-I doubles C(end), so with
+         0-based indices D(ubound-1) = 2*ubound*(C(ubound)/2) = ubound*C(ubound).
          */
 
                 double cplus1           = tview(i, j, ubound);
                 double cplus0           = tview(i, j, ubound - 1);
                 tview(i, j, ubound)     = 0;
-                tview(i, j, ubound - 1) = (ubound - 1) / norm * cplus1;
+                tview(i, j, ubound - 1) = ubound / norm * cplus1;
                 cplus1                  = cplus0;
                 for (int k = ubound - 2; k >= lbound; k--) {
                     cplus0         = tview(i, j, k);

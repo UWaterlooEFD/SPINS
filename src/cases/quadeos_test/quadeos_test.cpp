@@ -255,7 +255,7 @@ class userControl : public BaseCase {
     void analysis(double time, DTArray &u, DTArray &v, DTArray &w, vector<DTArray *> &tracers, DTArray &pressure) {
         // Set-up
         if (iter == 0) {
-            if (compute_enstrophy or compute_dissipation or compute_stresses_top or compute_stresses_bottom) { temp1 = alloc_array(Nx, Ny, Nz); }
+            temp1 = alloc_array(Nx, Ny, Nz); // unconditional: also used outside the optional diagnostics
             if (compute_stresses_top or compute_stresses_bottom) {
                 // initialize the vector of the bottom slope (Hprime)
                 Hprime = alloc_array(Nx, Ny, 1);

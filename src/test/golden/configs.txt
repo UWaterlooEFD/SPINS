@@ -1,0 +1,10 @@
+# Golden configurations for run_golden.sh: one per line,
+#   name  case  rtol  scales  key=value ...
+# rtol is the relative tolerance on every diagnostic, against the column's largest |value| in the
+# reference; scales names columns that sit near zero and the column whose scale they use instead
+# ("-" for none). The key=value pairs override the case's spins.conf.
+kh2d      kh_billow        1e-8  -                        Nx=256 Nz=64 final_time=40 plot_interval=40
+kh3d      kh_billow        1e-8  -                        Nx=64 Ny=16 Nz=32 final_time=20 plot_interval=20
+dipole    dipole           1e-8  -                        Nx=128 Nz=128 final_time=0.05 plot_interval=0.05
+map_iwave map_iwave        1e-8  Min_density:Max_density  Nx=256 Nz=32 final_time=11178 plot_interval=11178
+gc_noslip gravity_current  1e-8  -                        Nx=128 Nz=32 type_z=NO_SLIP final_time=4 plot_interval=4

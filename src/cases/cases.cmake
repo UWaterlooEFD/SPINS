@@ -1,4 +1,5 @@
 set (cases_TARGETS
+  abc_flow
   brydon_test
   derivatives
   dipole
@@ -13,6 +14,7 @@ set (cases_TARGETS
   qsp
   quadeos_test
   #salt_temp  # -- Broken.
+  verify_exact
   wave_reader
 )
 

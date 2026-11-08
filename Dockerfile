@@ -2,7 +2,7 @@
 
 FROM ubuntu:22.04
 
-RUN apt-get update && apt-get -y install libfftw3-dev libsuitesparse-dev libopenblas-serial-dev clang-format \
+RUN apt-get update && apt-get -y install libfftw3-dev libsuitesparse-dev clang-format \
         libboost-program-options-dev libopenmpi-dev curl zip unzip cmake python3-dev xxd build-essential g++ git
 
 RUN curl -fsL https://github.com/blitzpp/blitz/archive/refs/tags/1.0.2.zip -o /blitz-1.0.2.zip && mkdir -p /work/blitz
@@ -16,6 +16,13 @@ RUN unzip /blitz-1.0.2.zip && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make lib && \
     make install 
+
+WORKDIR /work
+RUN git clone https://github.com/OpenMathLib/OpenBLAS && \
+    cd OpenBLAS && \
+    git checkout v0.3.34 -b build && \
+    make -j8 USE_OPENMP=0 USE_THREAD=0 && \
+    make install PREFIX=/usr USE_OPENMP=0 USE_THREAD=0
 
 
 RUN mkdir -p /work/arma

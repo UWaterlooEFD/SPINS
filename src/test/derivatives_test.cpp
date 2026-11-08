@@ -11,6 +11,8 @@
 #include "NSIntegrator.hpp"
 
 #include "Science.hpp"
+#include "Par_util.hpp"
+#include "T_util.hpp"
 
 using std::unique_ptr;
 using std::cout;
@@ -138,6 +140,29 @@ TEST_F(DerivativesTest, AssertSecondDerivativesAreCorrect) {
     resid = sqrt(blitz::sum(test * test)) / (Nz * Nx);
 
     EXPECT_NEAR(sqrt(blitz::sum(vortnum * vortnum)) / (Nz * Nx), sqrt(blitz::sum(*vort_ * (*vort_))) / (Nz * Nx), reltol_eps) << "Vorticity (Chebyshev+Fourier) residual: " << resid << '\n';
+}
+
+// The Chebyshev derivative must be exact for every polynomial the grid represents, including the
+// highest mode. On the Gauss-Lobatto points z_k = cos(pi k/n), n = N-1, T_n(z_k) = (-1)^k, and
+// T_n'(z_k) is 0 in the interior, n^2 at z = 1 and (-1)^(n+1) n^2 at z = -1.
+TEST(ChebyshevDerivativeTest, HighestModeIsExact) {
+    thirdIndex kk;
+    for (int N : {8, 9, 16, 17, 32, 33}) {
+        const int n = N - 1;
+        DTArray   f(alloc_lbound(1, 1, N), alloc_extent(1, 1, N), alloc_storage(1, 1, N));
+        DTArray   df(alloc_lbound(1, 1, N), alloc_extent(1, 1, N), alloc_storage(1, 1, N));
+        DTArray   exact(alloc_lbound(1, 1, N), alloc_extent(1, 1, N), alloc_storage(1, 1, N));
+        Trans1D   tform(1, 1, N, Dimension::thirdDim, S_EXP::CHEBY);
+
+        f              = cos(M_PI * kk);
+        exact          = 0;
+        exact(0, 0, 0) = n * n;
+        exact(0, 0, n) = (n % 2 ? 1 : -1) * n * n;
+
+        deriv_cheb(f, tform, df);
+        const double relerr = max(abs(df - exact)) / (n * n);
+        EXPECT_LT(relerr, 1e-12) << "N = " << N;
+    }
 }
 
 // Get an MPI-capable testing binary out.

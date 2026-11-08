@@ -108,49 +108,56 @@ void compute_Background_PE(double &BPE_tot, TArrayn::DTArray &rho, TArrayn::DTAr
     // to the lightest element on the local domain
     double base_vol = local_vols_r[myrank];
 
-    // Find the depth at which base_vol will fill to
-    double tmpH, Area_star;
-    if (!mapped) {
-        tmpH = base_vol / Lx / Ly;
-    } else {
-        // check if base_vol will fill above the max hill height
-        if ((base_vol + hill_vol) / Lx / Ly >= hill_max) {
-            tmpH = (base_vol + hill_vol) / Lx / Ly;
-        } else {
-            // if it doesn't, find the depth where the fluid will fill to
-            int II = 0;
-            while ((base_vol > Lx_partsum[II] * sort_hill[II] - hillvol_partsum[II]) and (II < Nx - 1)) { II++; }
-            assert(II > 0 && "Something bad happened leading up to the tmpH calculation.");
-            // now subtract off the bit we went over by (draw yourself a picture, it works)
-            tmpH = sort_hill[II] - (sort_hill[II] * Lx_partsum[II] - base_vol - hillvol_partsum[II]) / Lx_partsum[II - 1];
-        }
-    }
-
-    // Now compute BPE from the sorted rho field
-    double dH  = 0;
+    // Now compute BPE from the sorted rho field, stacking this processor's cells downwards from
+    // the height that base_vol fills to
     double BPE = 0;
-    int    LL  = Nx - 1;
-    for (int II = sort_rho.lbound(firstDim); II <= sort_rho.ubound(firstDim); II++) {
-        for (int KK = sort_rho.lbound(thirdDim); KK <= sort_rho.ubound(thirdDim); KK++) {
-            for (int JJ = sort_rho.lbound(secondDim); JJ <= sort_rho.ubound(secondDim); JJ++) {
-                // Find the surface area of the water at depth tmpH
-                if (mapped && (tmpH < hill_max)) {
-                    while ((sort_hill[LL] > tmpH) && (LL > 0)) { LL--; }
-                    Area_star = Lx_partsum[LL] * Ly;
-                } else {
-                    Area_star = Lx * Ly;
+    if (!mapped) {
+        double tmpH = base_vol / Lx / Ly, dH = 0, Area_star = Lx * Ly;
+        for (int II = sort_rho.lbound(firstDim); II <= sort_rho.ubound(firstDim); II++) {
+            for (int KK = sort_rho.lbound(thirdDim); KK <= sort_rho.ubound(thirdDim); KK++) {
+                for (int JJ = sort_rho.lbound(secondDim); JJ <= sort_rho.ubound(secondDim); JJ++) {
+                    // spread volume over domain and compute BPE for that cell
+                    dH = sort_quad(II, JJ, KK) / Area_star;
+                    if (dimensional_rho) {
+                        // rho is dimensional density
+                        BPE += g * sort_rho(II, JJ, KK) * (tmpH - 0.5 * dH) * dH * Area_star;
+                    } else {
+                        // rho is density anomaly
+                        BPE += g * rho_0 * (1 + sort_rho(II, JJ, KK)) * (tmpH - 0.5 * dH) * dH * Area_star;
+                    }
+                    tmpH -= dH;
                 }
-
-                // spread volume over domain and compute BPE for that cell
-                dH = sort_quad(II, JJ, KK) / Area_star;
-                if (dimensional_rho) {
-                    // rho is dimensional density
-                    BPE += g * sort_rho(II, JJ, KK) * (tmpH - 0.5 * dH) * dH * Area_star;
-                } else {
-                    // rho is density anomaly
-                    BPE += g * rho_0 * (1 + sort_rho(II, JJ, KK)) * (tmpH - 0.5 * dH) * dH * Area_star;
+            }
+        }
+    } else {
+        // Over a hill the horizontal area changes with height, so each cell spans the heights to
+        // which the fluid below it and the fluid up to its top fill (fill_height, exact for the
+        // sorted hill profile). One area per cell (the area at its top) biases BPE high at first
+        // order, and by an amount that depends on where each processor's portion starts.
+        const double hill_area   = hill_vol / Ly; // hill cross-section in the x-z plane
+        int          kfill       = Nx - 1;
+        auto         fill_height = [&](double vol) {
+            const double a = vol / Ly; // fluid cross-section below the fill height
+            if (a + hill_area >= hill_max * Lx) return (a + hill_area) / Lx;
+            // smallest kfill with a <= the cross-section below sort_hill[kfill]; vol only decreases
+            // from call to call, so the search moves down from where the last call left it
+            while (kfill > 0 && a <= sort_hill[kfill - 1] * Lx_partsum[kfill - 1] - hillvol_partsum[kfill - 1]) { kfill--; }
+            if (kfill == 0) return sort_hill[0];
+            return sort_hill[kfill] - (sort_hill[kfill] * Lx_partsum[kfill] - hillvol_partsum[kfill] - a) / Lx_partsum[kfill - 1];
+        };
+        double vol_top = base_vol, h_top = fill_height(vol_top);
+        for (int II = sort_rho.lbound(firstDim); II <= sort_rho.ubound(firstDim); II++) {
+            for (int KK = sort_rho.lbound(thirdDim); KK <= sort_rho.ubound(thirdDim); KK++) {
+                for (int JJ = sort_rho.lbound(secondDim); JJ <= sort_rho.ubound(secondDim); JJ++) {
+                    const double vol_bot = vol_top - sort_quad(II, JJ, KK), h_bot = fill_height(vol_bot);
+                    const double h_mid = 0.5 * (h_top + h_bot);
+                    if (dimensional_rho) {
+                        BPE += g * sort_rho(II, JJ, KK) * h_mid * sort_quad(II, JJ, KK);
+                    } else {
+                        BPE += g * rho_0 * (1 + sort_rho(II, JJ, KK)) * h_mid * sort_quad(II, JJ, KK);
+                    }
+                    vol_top = vol_bot, h_top = h_bot;
                 }
-                tmpH -= dH;
             }
         }
     }

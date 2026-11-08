@@ -17,6 +17,13 @@ using namespace Transformer;
 // Global arrays to store quadrature weights
 Array<double, 1> _quadw_x, _quadw_y, _quadw_z;
 
+// Clenshaw-Curtis endpoint weight for sz points, before scaling by L/2. With n = sz - 1 intervals
+// it is 1/(n^2 - 1) for even n and 1/n^2 for odd n (Trefethen, clencurt.m)
+static double cc_endpoint(const int sz) {
+    const int n = sz - 1;
+    return (n % 2 == 0) ? 1.0 / (n * n - 1) : 1.0 / (n * n);
+}
+
 // Compute quadrature weights
 void compute_quadweights(int szx, int szy, int szz, double Lx, double Ly, double Lz, NSIntegrator::DIMTYPE DIM_X, NSIntegrator::DIMTYPE DIM_Y, NSIntegrator::DIMTYPE DIM_Z) {
     _quadw_x.resize(split_range(szx));
@@ -32,8 +39,8 @@ void compute_quadweights(int szx, int szy, int szz, double Lx, double Ly, double
         }
         if ((szx % 2)) _quadw_x -= cos(M_PI * ii) / ((szx - 1) * (szx - 1) - 1);
         _quadw_x = 2 * _quadw_x / (szx - 1);
-        if (_quadw_x.lbound(firstDim) == 0) { _quadw_x(0) = 1.0 / (szx - 1) / (szx - 1); }
-        if (_quadw_x.ubound(firstDim) == (szx - 1)) { _quadw_x(szx - 1) = 1.0 / (szx - 1) / (szx - 1); }
+        if (_quadw_x.lbound(firstDim) == 0) { _quadw_x(0) = cc_endpoint(szx); }
+        if (_quadw_x.ubound(firstDim) == (szx - 1)) { _quadw_x(szx - 1) = cc_endpoint(szx); }
         _quadw_x *= Lx / 2;
     } else {
         // Trapezoid rule
@@ -49,8 +56,8 @@ void compute_quadweights(int szx, int szy, int szz, double Lx, double Ly, double
         }
         if ((szy % 2)) _quadw_y -= cos(M_PI * ii) / ((szy - 1) * (szy - 1) - 1);
         _quadw_y          = 2 * _quadw_y / (szy - 1);
-        _quadw_y(0)       = 1.0 / (szy - 1) / (szy - 1);
-        _quadw_y(szy - 1) = 1.0 / (szy - 1) / (szy - 1);
+        _quadw_y(0)       = cc_endpoint(szy);
+        _quadw_y(szy - 1) = cc_endpoint(szy);
         _quadw_y *= Ly / 2;
     } else {
         // Trapezoid rule
@@ -66,8 +73,8 @@ void compute_quadweights(int szx, int szy, int szz, double Lx, double Ly, double
         }
         if ((szz % 2)) _quadw_z -= cos(M_PI * ii) / ((szz - 1) * (szz - 1) - 1);
         _quadw_z          = 2 * _quadw_z / (szz - 1);
-        _quadw_z(0)       = 1.0 / (szz - 1) / (szz - 1);
-        _quadw_z(szz - 1) = 1.0 / (szz - 1) / (szz - 1);
+        _quadw_z(0)       = cc_endpoint(szz);
+        _quadw_z(szz - 1) = cc_endpoint(szz);
         _quadw_z *= Lz / 2;
     } else {
         // Trapezoid rule
