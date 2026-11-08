@@ -269,9 +269,10 @@ namespace Transformer {
                 return size - 1; // Either way, there's a 0-frequency
             case FOURIER:
                 /* A Fourier dimension has both positive and negative frequencies,
-               and the positives only run up to (size+1)/2 
-               (size 1 -- DC only.  Size 2 -- DC and Nyquist)*/
-                return double(int((size + 1) / 2));
+               and the positives only run up to size/2
+               (size 1 -- DC only.  Size 2 -- DC and Nyquist.  Odd sizes have
+               no Nyquist mode.)*/
+                return static_cast<double>(size / 2);
             default:
                 abort(); // No specific transform made yet.  Oopsie!
         }

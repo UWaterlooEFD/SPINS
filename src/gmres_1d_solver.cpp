@@ -172,7 +172,7 @@ void cheb_d2::build_precond() {
     /* Theta goes from pi to 0 */
     //   theta = M_PI - M_PI*(ii-1)/(size-1);
     //   double dtheta = M_PI/(size-1);
-    x = -length * cos(M_PI * ii / (size - 1));
+    x = -length / 2 * cos(M_PI * ii / (size - 1));
     get_fd_operator(x, D, D2);
     /* The third row of the matrix is the main diagonal.
       It's weird, but that's LAPACK for you. */
@@ -273,7 +273,7 @@ double cheb_d2::resid_dot(RType &r1, RType &r2) {
     const double extent = r1->zline->extent(thirdDim);
     double       mysum  = (*r1->zline)(0, 0, lbound) * (*r2->zline)(0, 0, lbound) + (*r1->zline)(0, 0, ubound) * (*r2->zline)(0, 0, ubound);
     for (int i = r1->zline->lbound(thirdDim) + 1; i <= r1->zline->ubound(thirdDim) - 1; i++) { mysum = mysum + (*r1->zline)(0, 0, i) * (*r2->zline)(0, 0, i) / extent; }
-    if (a_top == 0 && b_top == 0 && helm == 0) { mysum += r1->extra * r2->extra; }
+    if (a_top == 0 && a_bot == 0 && helm == 0) { mysum += r1->extra * r2->extra; }
     return mysum;
     //   if (a_top == 0 && b_top == 0 && helm == 0) {
     //      return sum((*r1->zline)*(*r2->zline))/(r1->zline->extent(thirdDim))+
@@ -283,7 +283,7 @@ double cheb_d2::resid_dot(RType &r1, RType &r2) {
     //   }
 }
 double cheb_d2::basis_dot(BType &b1, BType &b2) {
-    if (a_top == 0 && b_top == 0 && helm == 0) {
+    if (a_top == 0 && a_bot == 0 && helm == 0) {
         return sum((*b1->zline) * (*b2->zline)) / (b1->zline->extent(thirdDim)) + b1->extra * b2->extra;
     } else {
         return sum((*b1->zline) * (*b2->zline)) / (b1->zline->extent(thirdDim));

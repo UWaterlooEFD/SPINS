@@ -50,6 +50,7 @@ class cheb_d2 : public GMRES_Interface<gridline *, gridline *> {
         a_top      = atop;
         a_bot      = abot;
         length     = -1;
+        helm       = 0;
         size       = sz;
         tline      = new DTArray(1, 1, size);
         chebformer = new Trans1D(1, 1, size, thirdDim, Transformer::CHEBY);
@@ -174,14 +175,14 @@ class cheb_d2 : public GMRES_Interface<gridline *, gridline *> {
     }
 
     double resid_dot(RType &r1, RType &r2) {
-        if (a_top == 0 && b_top == 0 && helm == 0) {
+        if (a_top == 0 && a_bot == 0 && helm == 0) {
             return sum((*r1->zline) * (*r2->zline)) / (r1->zline->extent(thirdDim)) + r1->extra * r2->extra;
         } else {
             return sum((*r1->zline) * (*r2->zline)) / (r1->zline->extent(thirdDim));
         }
     }
     double basis_dot(BType &b1, BType &b2) {
-        if (a_top == 0 && b_top == 0 && helm == 0) {
+        if (a_top == 0 && a_bot == 0 && helm == 0) {
             return sum((*b1->zline) * (*b2->zline)) / (b1->zline->extent(thirdDim)) + b1->extra * b2->extra;
         } else {
             return sum((*b1->zline) * (*b2->zline)) / (b1->zline->extent(thirdDim));

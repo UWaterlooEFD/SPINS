@@ -20,6 +20,14 @@ enable_testing()
 add_executable(
   spins_test
   derivatives_test.cpp
+  spectral_ops_test.cpp
+  timestep_test.cpp
+  elliptic1d_test.cpp
+  transpose_test.cpp
+  science_test.cpp
+  elliptic2d_test.cpp
+  spatial_convergence_test.cpp
+  ../Timestep.cpp
   ../TArray.cpp
   ../grad.cpp
   ../Parformer.cpp
@@ -30,6 +38,13 @@ add_executable(
   ../gmres_1d_solver.cpp
   ../Par_util.cpp
   ../multigrid.cpp
+  ../Sorter.cpp
+  ../Science/compute_quadweights.cpp
+  ../Science/get_quads.cpp
+  ../Science/compute_background_PE.cpp
+  ../Science/nleos.cpp
+  ../Science/lineos.cpp
+  ../Science/quadeos.cpp
 )
 target_link_libraries(
   spins_test
@@ -56,4 +71,4 @@ target_include_directories(spins_test
 
 
 include(GoogleTest)
-gtest_discover_tests(spins_test)
+gtest_discover_tests(spins_test DISCOVERY_TIMEOUT 60)
