@@ -20,8 +20,25 @@
     #define timing_pop()
 
 #else
+    #include <mpi.h> // for the MPI_Comm default argument below
+
 void timing_push(const char *name);
 void timing_pop();
+
+/* Rank identity, captured by the run while MPI is alive.  The report fires
+   after MPI_Finalize (every case main is `do_run(...); MPI_Finalize();
+   return 0;` with the evolver a main-scope object), where no rank query may
+   be made -- so the per-rank file names come from here, never from a query
+   at the emit site. */
+void timing_set_rank(MPI_Comm comm = MPI_COMM_WORLD);
+
+/* When the environment names a prefix (SPINS_TIMING_RANK_FILES), write this
+   rank's call tree to <prefix>.rank<NNN>.txt in the workspace, in the same
+   format timing_stack_report prints.  Deliberately NOT guarded by master():
+   every rank writes its own file.  No-op, and no I/O of any kind, when the
+   variable is unset -- which is what keeps the cost of this file the
+   library's normal zero. */
+void timing_rank_files();
 #endif
 
 void timing_stack_report();

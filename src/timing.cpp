@@ -1,10 +1,19 @@
 #include "timing.hpp"
 #include <string>
+#include <cstring>
 #include <vector>
 #include <mpi.h>
 #include <stdio.h>
+#include <stdlib.h> // getenv
 
 #ifdef TIMING_ENABLE
+
+// Rank identity for the per-rank report files (see timing.hpp).  Global state,
+// like the tree itself: the emit site fires after MPI_Finalize, where no rank
+// query may be made, so these are captured in the constructor instead.
+static int timing_my_rank   = 0;
+static int timing_num_ranks = 1;
+
 // Structure for information related to a single timing invocation
 struct timing_element;
 
@@ -77,21 +86,54 @@ void timing_pop() {
     current = current->parent;
 }
 
-void print_element(timing_element *el, int indent) {
+/* Print one element to `out` -- the single format both the stderr report and
+   the per-rank files share, which is what makes a rank file byte-identical to
+   the line this rank's tree prints. */
+void print_element(timing_element *el, int indent, FILE *out) {
     if (el->total_time < 1) { // output in ms
-        fprintf(stderr, "%*s%s -- %d -- %.2fms\n", indent, "", el->name.c_str(), el->count, el->total_time * 1000);
+        fprintf(out, "%*s%s -- %d -- %.2fms\n", indent, "", el->name.c_str(), el->count, el->total_time * 1000);
     } else { // output in seconds
-        fprintf(stderr, "%*s%s -- %d -- %.3fs\n", indent, "", el->name.c_str(), el->count, el->total_time);
+        fprintf(out, "%*s%s -- %d -- %.3fs\n", indent, "", el->name.c_str(), el->count, el->total_time);
     }
 }
 
-void timing_stack_recurse(timing_element *el, int indent) {
-    print_element(el, indent);
-    for (int i = 0; i < el->children.size(); i++) { timing_stack_recurse(el->children[i], indent + 1); }
+void timing_stack_recurse(timing_element *el, int indent, FILE *out) {
+    print_element(el, indent, out);
+    for (int i = 0; i < el->children.size(); i++) { timing_stack_recurse(el->children[i], indent + 1, out); }
+}
+
+void timing_set_rank(MPI_Comm comm) {
+    // Point-to-point-free queries, and only ever called while MPI is alive.
+    MPI_Comm_rank(comm, &timing_my_rank);
+    MPI_Comm_size(comm, &timing_num_ranks);
 }
 
 void timing_stack_report() {
-    for (int i = 0; i < root.size(); i++) { timing_stack_recurse(root[i], 0); }
+    for (int i = 0; i < root.size(); i++) { timing_stack_recurse(root[i], 0, stderr); }
+}
+
+/* Per-rank timing files.  Nothing here is derived: the
+   aggregation is done outside the model, so the file is the same tree the
+   stderr report prints, and the only new state is the rank the file is named
+   for.  Opt-in: with SPINS_TIMING_RANK_FILES unset this reads one environment
+   variable and returns -- and it is only ever called from a TIMINGS=true
+   build, so the library's normal cost stays the zero it is today. */
+void timing_rank_files() {
+    const char *prefix = getenv("SPINS_TIMING_RANK_FILES");
+    if (prefix == 0) { return; }
+
+    char filename[1024];
+    sprintf(filename, "%s.rank%03d.txt", prefix, timing_my_rank);
+
+    FILE *out = fopen(filename, "w");
+    if (out == 0) { // a rank that wrote nothing reads downstream as a missing rank
+        fprintf(stderr, "WARNING: Unable to open timing rank file %s\n", filename);
+        return;
+    }
+    for (int i = 0; i < root.size(); i++) { timing_stack_recurse(root[i], 0, out); }
+    fclose(out);
+
+    if (timing_my_rank == 0) { fprintf(stderr, "Timing: per-rank files written with prefix %s on %d ranks\n", prefix, timing_num_ranks); }
 }
 
 #else

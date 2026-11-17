@@ -18,6 +18,13 @@ using std::complex;
 vector<int> get_extents(int size, int numprocs);
 vector<int> get_lbounds(int size, int numprocs);
 
+/* Startup check: is this rank count admissible for a grid of size_x x size_z?
+   A case calls it straight after parsing its own options -- before any array is
+   allocated, transformed or communicated -- and every violated bound is
+   reported, not just the first.  Aborts the communicator when one is; see the
+   definition for what each bound is measured on. */
+void check_np_for_grid(int size_x, int size_z, MPI_Comm comm);
+
 using blitz::Array;
 using blitz::TinyVector;
 using blitz::GeneralArrayStorage;

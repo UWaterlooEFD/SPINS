@@ -172,7 +172,7 @@ void cheb_d2::build_precond() {
     /* Theta goes from pi to 0 */
     //   theta = M_PI - M_PI*(ii-1)/(size-1);
     //   double dtheta = M_PI/(size-1);
-    x = -length / 2 * cos(M_PI * ii / (size - 1));
+    x = -(length / 2) * cos(M_PI * ii / (size - 1));
     get_fd_operator(x, D, D2);
     /* The third row of the matrix is the main diagonal.
       It's weird, but that's LAPACK for you. */
@@ -227,6 +227,10 @@ void cheb_d2::build_precond() {
    }
 #endif
     dgbtrf_(&m, &n, &kl, &ku, band_d2.data(), &ldab, pivot_factors.data(), &info);
+    if (info != 0) {
+        fprintf(stderr, "FATAL: dgbtrf failed in cheb_d2::build_precond (info=%d): N=%d, helm=%g, a_top=%g, a_bot=%g, b_top=%g, b_bot=%g -- singular preconditioner factor, aborting\n", info, size, helm, a_top, a_bot, b_top, b_bot);
+        exit(1);
+    }
     factored = true;
 }
 
@@ -258,6 +262,10 @@ void cheb_d2::precondition(RType &r, BType &x) {
 
     /* And solve */
     dgbtrs_("N", &n, &kl, &ku, &nrhs, band_d2.data(), &ldab, pivot_factors.data(), x->zline->data(), &ldb, &info);
+    if (info != 0) {
+        fprintf(stderr, "FATAL: dgbtrs failed in cheb_d2::precondition (info=%d): N=%d, helm=%g, a_top=%g, a_bot=%g, b_top=%g, b_bot=%g -- preconditioner solve failed, aborting\n", info, size, helm, a_top, a_bot, b_top, b_bot);
+        exit(1);
+    }
     //   dgbsv_(&n, &kl, &ku, &nrhs, band_d2.data(), &ldab,
     //         ipiv, (*x->zline).data(), &ldb, &info);
     /* If we have to do the DC-correction, make sure we apply t
@@ -342,7 +350,14 @@ int poisson_1d(Array<double, 1> &resid, Array<double, 1> &soln, double length, d
     static cheb_d2::BType         ans_vec   = 0;
     static cheb_d2               *kernel    = 0;
     static GMRES_Solver<cheb_d2> *gmresser  = 0;
-    /* If the residual is zero, the solution is obviously itself zero */
+    /* If the residual is zero, the solution is obviously itself zero.
+       Not just an optimization: a zero line must never reach gmres_inner,
+       where starting_norm = sqrt(ops->resid_dot(start_r,start_r)) is then 0
+       and the Arnoldi basis is scaled by 1/starting_norm -- the NaN reaches
+       LAPACK and the run dies.  The exact == 0 compare is correctness
+       protection, not a shortcut; do not weaken it to a norm threshold
+       (the failure mode is the one above: an exactly-zero leading coefficient
+        leaves the band singular, and a norm threshold would not catch it). */
     //   fprintf(stderr,"Calling poisson_1d with parameters:\n");
     //   fprintf(stderr,"length=%f, helm=%f, a_top=%f, a_bot=%f\n",length,helmholtz,a_top,a_bot);
     //   fprintf(stderr,"b_top=%f, b_bot=%f\n",b_top,b_bot);

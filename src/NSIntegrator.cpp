@@ -27,6 +27,5 @@ namespace NSIntegrator {
                 return NONE;
         }
     }
+    template class FluidEvolve<BaseCase>; // Explicit template instantiation
 } // namespace NSIntegrator
-
-template class FluidEvolve<BaseCase>; // Explicit template instantiation

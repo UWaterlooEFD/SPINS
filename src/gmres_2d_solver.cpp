@@ -421,6 +421,17 @@ void Cheb_2dmg::build_precond() {
 
       */
 
+    /* The orientation guards below test a property of the MAPPING.  Where the
+       Jacobian is constant every rank holds the same scalars, so the rank-local
+       answer already is the global answer and nothing needs to be communicated
+       -- the unmapped arms of the model stay free of collectives.  Where it
+       varies, the guard decision is reduced BEFORE the branch is taken: every
+       rank enters, or none does, which is what makes the checks parallel-safe
+       (the note below the bottom guard used the absence of this as the reason
+       they could not be).  Declared out here because the two blocks below are
+       siblings, and the side boundaries share one stop. */
+    const bool jac_is_const = grad_3d->constant_jac();
+
     { // Top/bottom
         Range            lxrange = split_range(szx, my_comm);
         Array<double, 1> alpha_x(lxrange), alpha_z(lxrange), beta_x(lxrange), beta_z(lxrange), det(lxrange);
@@ -453,15 +464,53 @@ void Cheb_2dmg::build_precond() {
             /* At the bottom (beta=max), we want the normal to be in the
             outward beta direction.  Beta is [-az/D; ax/D] */
 
-            if (any(dx_bot * (-alpha_z / det) + dz_bot * alpha_x / det < 0)) {
+            // Evaluate the guard, then REDUCE the decision before branching on
+            // it: with a varying Jacobian one rank can see the flip and its
+            // neighbour not, and it was exactly the rank-local entry to this
+            // branch that made a parallel check a deadlock (note below).
+            // Reduced entry means every rank enters, or none does.
+            bool trig_bot = bool(any(dx_bot * (-alpha_z / det) + dz_bot * alpha_x / det < 0));
+            if (!jac_is_const) trig_bot = psany(trig_bot, my_comm);
+
+            if (trig_bot) {
                 // If any d/dnormal*d/dt > 0, it better all be or we've screwed up
                 // orientations somehow
-                // This -should be- a parallel check, but first of all it is unlikely
-                // that the orientation would flip exactly at processor boundaries,
-                // and secondly if the orientation flips on one but not all processors
-                // the if statement above won't necessarily trigger, making a parallel
-                // check here into a deadlock.
-                assert(all(dx_bot * (-beta_x / det) + dz_bot * (alpha_x / det) < 0));
+                // This -is- a parallel check now that the decision above is
+                // reduced first.  The old note here said it could not be: a flip on
+                // one processor but not all would leave the if statement
+                // inconsistent between ranks and put a collective inside a branch
+                // only some ranks take, and reducing the decision is what removes
+                // that.  It also catches a flip that lands exactly on a rank
+                // boundary, where every slab is internally consistent and a
+                // rank-local check sees nothing.
+                // A fully inconsistent orientation is a fatal error, not an
+                // assert-abort: the mapped grid/flow direction must be consistent
+                // at every node, and continuing would use the wrong normal.
+                {
+                    double dot_bot  = 0.0;
+                    int    node     = alpha_x.lbound(0);
+                    bool   violated = false;
+                    for (int i = alpha_x.lbound(0); i <= alpha_x.ubound(0); i++) {
+                        dot_bot = dx_bot(i) * (-alpha_z / det)(i) + dz_bot(i) * (alpha_x / det)(i);
+                        if (dot_bot >= 0.0) {
+                            node     = i;
+                            violated = true;
+                            break;
+                        }
+                    }
+                    // The scan is a report, so it stays rank-local: each rank
+                    // names the first offending node on its own slab.  The
+                    // decision is not rank-local, and neither is the stop -- a
+                    // rank that leaves the job by itself takes its neighbours'
+                    // output, and whatever collective they sit in, down with it.
+                    bool bad = violated;
+                    if (!jac_is_const) bad = psany(violated, my_comm);
+                    if (violated) {
+                        fprintf(stderr, "FATAL: bottom boundary-flux orientation violated at node %d (dot=%g, det=%g) -- the mapped grid/flow direction is inconsistent, ending the run.\n", node, dot_bot, det(node));
+                        fflush(stderr);
+                    }
+                    if (bad) MPI_Abort(my_comm, 1);
+                }
                 dx_bot = -dx_bot;
                 dz_bot = -dz_bot;
             }
@@ -493,10 +542,38 @@ void Cheb_2dmg::build_precond() {
             /* At the top (beta=0), we want the normal to be in the
             negative beta direction.  Beta is [-az/D; ax/D] */
 
-            if (any(dx_top * (-alpha_z / det) + dz_top * alpha_x / det > 0)) {
+            // As at the bottom: evaluate, reduce, then branch.
+            bool trig_top = bool(any(dx_top * (-alpha_z / det) + dz_top * alpha_x / det > 0));
+            if (!jac_is_const) trig_top = psany(trig_top, my_comm);
+
+            if (trig_top) {
                 // If any d/dnormal*d/dt > 0, it better all be or we've screwed up
                 // orientations somehow
-                assert(all(dx_top * (-alpha_z / det) + dz_top * (alpha_x / det) > 0));
+                // A fully inconsistent orientation is a fatal error, not an
+                // assert-abort: the mapped grid/flow direction must be consistent
+                // at every node, and continuing would use the wrong normal.
+                {
+                    double dot_top  = 0.0;
+                    int    node     = alpha_x.lbound(0);
+                    bool   violated = false;
+                    for (int i = alpha_x.lbound(0); i <= alpha_x.ubound(0); i++) {
+                        dot_top = dx_top(i) * (-alpha_z / det)(i) + dz_top(i) * (alpha_x / det)(i);
+                        if (dot_top <= 0.0) {
+                            node     = i;
+                            violated = true;
+                            break;
+                        }
+                    }
+                    // The report stays rank-local; the decision and the stop do
+                    // not (see the bottom site for why).
+                    bool bad = violated;
+                    if (!jac_is_const) bad = psany(violated, my_comm);
+                    if (violated) {
+                        fprintf(stderr, "FATAL: top boundary-flux orientation violated at node %d (dot=%g, det=%g) -- the mapped grid/flow direction is inconsistent, ending the run.\n", node, dot_top, det(node));
+                        fflush(stderr);
+                    }
+                    if (bad) MPI_Abort(my_comm, 1);
+                }
                 dx_top = -dx_top;
                 dz_top = -dz_top;
             }
@@ -505,6 +582,14 @@ void Cheb_2dmg::build_precond() {
     { // Left/right
         Array<double, 1> alpha_x(szz), alpha_z(szz), beta_x(szz), beta_z(szz), det(szz);
         Range            rall = Range::all();
+
+        // Neither side boundary is split across ranks -- the ownership tests
+        // below pick exactly one rank each -- so their guards need no reduction:
+        // the owner's column IS the whole boundary.  The STOP needs one all the
+        // same, so the two flags are declared out here, where the collective stop
+        // at the bottom of this block (reached by every rank) can read them.
+        bool viol_left  = false;
+        bool viol_right = false;
 
         if (t1.lbound(firstDim) == 0) {
             // Left
@@ -538,7 +623,27 @@ void Cheb_2dmg::build_precond() {
             if (any(dx_left * (beta_z / det) + dz_left * (-beta_x / det) < 0)) {
                 // If any d/dnormal*d/dt > 0, it better all be or we've screwed up
                 // orientations somehow
-                assert(all((dx_left * (beta_z / det) + dz_left * (-beta_x / det)) < 0));
+                // A fully inconsistent orientation is a fatal error, not an
+                // assert-abort: the mapped grid/flow direction must be consistent
+                // at every node, and continuing would use the wrong normal.
+                {
+                    double dot_left = 0.0;
+                    int    node     = 0;
+                    bool   violated = false;
+                    for (int i = 0; i <= dx_left.ubound(0); i++) {
+                        dot_left = dx_left(i) * (beta_z / det)(i) + dz_left(i) * (-beta_x / det)(i);
+                        if (dot_left >= 0.0) {
+                            node     = i;
+                            violated = true;
+                            break;
+                        }
+                    }
+                    if (violated) {
+                        fprintf(stderr, "FATAL: left boundary-flux orientation violated at node %d (dot=%g, det=%g) -- the mapped grid/flow direction is inconsistent, ending the run.\n", node, dot_left, det(node));
+                        fflush(stderr);
+                        viol_left = true;
+                    }
+                }
                 dx_left = -dx_left;
                 dz_left = -dz_left;
             }
@@ -575,11 +680,42 @@ void Cheb_2dmg::build_precond() {
             if (any(dx_right * (beta_z / det) + dz_right * (-beta_x / det) > 0)) {
                 // If any d/dnormal*d/dt > 0, it better rall be or we've screwed up
                 // orientations somehow
-                assert(all(dx_right * (beta_z / det) + dz_right * (-beta_x / det) > 0));
+                // A fully inconsistent orientation is a fatal error, not an
+                // assert-abort: the mapped grid/flow direction must be consistent
+                // at every node, and continuing would use the wrong normal.
+                {
+                    double dot_right = 0.0;
+                    int    node      = 0;
+                    bool   violated  = false;
+                    for (int i = 0; i <= dx_right.ubound(0); i++) {
+                        dot_right = dx_right(i) * (beta_z / det)(i) + dz_right(i) * (-beta_x / det)(i);
+                        if (dot_right <= 0.0) {
+                            node     = i;
+                            violated = true;
+                            break;
+                        }
+                    }
+                    if (violated) {
+                        fprintf(stderr, "FATAL: right boundary-flux orientation violated at node %d (dot=%g, det=%g) -- the mapped grid/flow direction is inconsistent, ending the run.\n", node, dot_right, det(node));
+                        fflush(stderr);
+                        viol_right = true;
+                    }
+                }
                 dx_right = -dx_right;
                 dz_right = -dz_right;
             }
         }
+
+        // One collective stop for both side boundaries, and deliberately out here:
+        // a collective inside either ownership arm above is deadlocked by the ARM
+        // (every other rank skips it entirely, whatever the guard says), while
+        // this line is reached by every rank of the split.  A rank that leaves the
+        // job alone is the failure mode this replaces: in the case that motivated
+        // reporting rank's line went down with the job (check_np_for_grid,
+        // Splits.cpp, is the pattern copied here).
+        bool bad = viol_left || viol_right;
+        if (!jac_is_const) bad = psany(bad, my_comm);
+        if (bad) MPI_Abort(my_comm, 1);
     }
 
     /*
@@ -963,6 +1099,11 @@ int poisson_2d(TArrayn::DTArray &resid, TArrayn::DTArray &soln, TArrayn::Grad *g
         xbc_b = zbc_b;
     }
 
+    /* Same invariant as poisson_1d's, MPI-widened: an exactly-zero line must
+       not reach gmres_inner, whose 1/starting_norm then poisons the Krylov
+       basis with NaN (correctness protection, not an optimization).
+       It was measured by identity of mechanism only: the 2-D zero population
+       is not separately measured. */
     if (psall(all(resid == 0), gradient->get_communicator())) {
         soln = 0;
         return 1;

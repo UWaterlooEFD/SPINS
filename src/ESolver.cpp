@@ -204,7 +204,13 @@ namespace ESolver {
                     else f_ptr = &rhs;
                 }
                 // Solve with 2D GMRES
-                poisson_2d(*f_ptr, *u_ptr, gradient, type_x, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                int itc = poisson_2d(*f_ptr, *u_ptr, gradient, type_x, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                if (itc <= 0) {
+                    /* A non-converged solve hands back a field that is not a solution -- end the run (the relative residual actually achieved, against the solver's own tolerance, is on the GMRES warning line just above). */
+                    fprintf(stderr, "ERROR: 2D Multigrid Solve (slab %d: %g) real slab did not converge\nReturned GMRES iteration count of %d\nMaximum initial residual %g\n", j, (M + ls(j) * ls(j) * Jy * Jy), itc, max(abs(*f_ptr)));
+                    fprintf(stderr, "FATAL: the 2D Poisson/Helmholtz solve (real slab %d, H=%g, BCs (%g,%g)+(%g,%g)) failed to converge -- the field is invalid, ending the run.\n", j, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                    exit(1);
+                }
                 if (szy > 1) {
                     // Assign the results back to the appropriate slice of the
                     // spanwise transform temporary.  After all slabs are solved,
@@ -217,12 +223,24 @@ namespace ESolver {
                real part first.  We will wlays have a slab-copy to work with as well, since
                poisson_2d is specialized for real doubles */
                 *twod_f = real((*(spanwise_xform->get_complex_temp()))(Range::all(), Range(j, j), Range::all()));
-                poisson_2d(*twod_f, *twod_u, gradient, type_x, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                int itc = poisson_2d(*twod_f, *twod_u, gradient, type_x, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                if (itc <= 0) {
+                    /* A non-converged solve hands back a field that is not a solution -- end the run (the relative residual actually achieved, against the solver's own tolerance, is on the GMRES warning line just above). */
+                    fprintf(stderr, "ERROR: 2D Multigrid Solve (slab %d: %g) real part of the complex spanwise slab did not converge\nReturned GMRES iteration count of %d\nMaximum initial residual %g\n", j, (M + ls(j) * ls(j) * Jy * Jy), itc, max(abs(*twod_f)));
+                    fprintf(stderr, "FATAL: the 2D Poisson/Helmholtz solve (complex real part, slab %d, H=%g, BCs (%g,%g)+(%g,%g)) failed to converge -- the field is invalid, ending the run.\n", j, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                    exit(1);
+                }
                 // Assign th solution in twod_u to the real part of the spanwise xform
                 real((*(spanwise_xform->get_complex_temp()))(Range::all(), Range(j, j), Range::all())) = *twod_u;
                 // And repeat the above process with the imaginary part
                 *twod_f = imag((*(spanwise_xform->get_complex_temp()))(Range::all(), Range(j, j), Range::all()));
-                poisson_2d(*twod_f, *twod_u, gradient, type_x, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                itc     = poisson_2d(*twod_f, *twod_u, gradient, type_x, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                if (itc <= 0) {
+                    /* A non-converged solve hands back a field that is not a solution -- end the run (the relative residual actually achieved, against the solver's own tolerance, is on the GMRES warning line just above). */
+                    fprintf(stderr, "ERROR: 2D Multigrid Solve (slab %d: %g) imaginary part of the complex spanwise slab did not converge\nReturned GMRES iteration count of %d\nMaximum initial residual %g\n", j, (M + ls(j) * ls(j) * Jy * Jy), itc, max(abs(*twod_f)));
+                    fprintf(stderr, "FATAL: the 2D Poisson/Helmholtz solve (complex imaginary part, slab %d, H=%g, BCs (%g,%g)+(%g,%g)) failed to converge -- the field is invalid, ending the run.\n", j, (M + ls(j) * ls(j) * Jy * Jy), zbc_a, zbc_b, xbc_a, xbc_b);
+                    exit(1);
+                }
                 imag((*(spanwise_xform->get_complex_temp()))(Range::all(), Range(j, j), Range::all())) = *twod_u;
             }
         }
@@ -303,7 +321,8 @@ namespace ESolver {
                     if (iter_count <= 0) {
                         fprintf(stderr, "ERROR: Solve (%d, %d: %f) real did not converge\nReturned GMRES iteration conut of %d\n", iii, jjj, -(ks(iii) + ls(jjj) - M), iter_count);
                         fprintf(stderr, "Maximum initial residual %g\n", max(abs(resid)));
-                        assert(iter_count > 0);
+                        fprintf(stderr, "FATAL: the 1D Poisson/Helmholtz solve (%d, %d) failed to converge -- the field is invalid, ending the run.\n", iii, jjj);
+                        exit(1);
                     }
                     gcount += iter_count;
                     real(transyz(iii, jjj, blitz::Range::all())) = soln;
@@ -314,7 +333,8 @@ namespace ESolver {
                     //               cout << resid << soln;*/
                     if (iter_count <= 0) {
                         fprintf(stderr, "ERROR: Solve (%d, %d: %f) imag did not converge\nReturned GMRES iteration cout of %d\n", iii, jjj, -(ks(iii) + ls(jjj) - M), iter_count);
-                        assert(iter_count > 0);
+                        fprintf(stderr, "FATAL: the 1D Poisson/Helmholtz solve (%d, %d) failed to converge -- the field is invalid, ending the run.\n", iii, jjj);
+                        exit(1);
                     }
                     gcount += iter_count;
                     imag(transyz(iii, jjj, blitz::Range::all())) = soln;
@@ -361,7 +381,8 @@ namespace ESolver {
                     gcount += iter_count;
                     if (iter_count <= 0) {
                         fprintf(stderr, "ERROR: Solve (%d, %d: %f) all-real did not converge\nReturned GMRES iteration cout of %d\n", iii, jjj, -(ks(iii) + ls(jjj) - M), iter_count);
-                        assert(iter_count > 0);
+                        fprintf(stderr, "FATAL: the 1D Poisson/Helmholtz solve (%d, %d) failed to converge -- the field is invalid, ending the run.\n", iii, jjj);
+                        exit(1);
                     }
                     transyz(iii, jjj, blitz::Range::all()) = soln;
                 }
