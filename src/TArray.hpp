@@ -57,10 +57,16 @@ namespace TArrayn {
     template <class T>
     class TArray : public Array<T, 3> {
         /* Main (templated) array type, extending Blitz Arrays to enable
-      fftw transforms */
+      fftw transforms.
+
+      The FFTW plan cache used to live here, one map per array.  It now lives in
+      Plan_cache, keyed on the geometry of the transform rather than the addresses
+      of the arrays (see Plan_spec), for two reasons: an array-scoped cache keyed
+      on addresses could not tell a reused address from the same geometry, and it
+      multiplied every geometry by
+      the number of arrays that use it -- the live case built 67 plans, and kept
+      67 even-extension scratch buffers, for one shape. */
       private:
-        typedef hash_map<Plan_spec, Plan_holder, plan_hash> p_hash;
-        p_hash                                              plans;
         TArray(const TArray &copyfrom); // private copy constructor for error
       public:
         typedef Array<T, 3> Baseclass; // Base class of TArray
@@ -74,19 +80,19 @@ namespace TArrayn {
         using Baseclass::operator=;
 
         // From Blitz::Array constructor
-        TArray(const Baseclass &copyfrom) : Baseclass(copyfrom), plans() { }
+        TArray(const Baseclass &copyfrom) : Baseclass(copyfrom) { }
 
         TArray(int x, int y, int z) // Default constructor
             :
-            Baseclass(x, y, z), plans() {
+            Baseclass(x, y, z) {
             *this = 0;
         }
 
         /* Range constructor, no Storage Order */
-        TArray(const TinyVector<int, 3> &lbound, const TinyVector<int, 3> &ubound) : Baseclass(lbound, ubound), plans() { *this = 0; };
+        TArray(const TinyVector<int, 3> &lbound, const TinyVector<int, 3> &ubound) : Baseclass(lbound, ubound) { *this = 0; };
 
         /* Fully general constructor */
-        TArray(const TinyVector<int, 3> &lbound, const TinyVector<int, 3> &ubound, GeneralArrayStorage<3> storage) : Baseclass(lbound, ubound, storage), plans() { *this = 0; };
+        TArray(const TinyVector<int, 3> &lbound, const TinyVector<int, 3> &ubound, GeneralArrayStorage<3> storage) : Baseclass(lbound, ubound, storage) { *this = 0; };
 
         /* Because of the interactions of Real-to-Complex transforms, the
          transform function itsemf must be a templated function.  In

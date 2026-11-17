@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include "Par_util.hpp"
 #include "grad.hpp"
+#include "timing.hpp"
 
 // Global values to control filtering
 extern double f_cutoff, f_order, f_strength;
@@ -198,6 +199,14 @@ namespace NSIntegrator {
             x_beta(0),
             z_alpha(0),
             z_beta(0) {
+#ifdef TIMING_ENABLE
+            /* Rank identity for the per-rank timing files.
+               Captured here, in the constructor, because the emit site is the
+               destructor -- which runs after MPI_Finalize, where no rank query
+               may be made.  Two local queries on MPI_COMM_WORLD, no collective;
+               a TIMINGS=false build sees nothing at all. */
+            timing_set_rank();
+#endif
             /* For now, only the vertical can be no-slip */
             assert(ty == PERIODIC || ty == FREE_SLIP);
             /* Initialize Stepped's in tracers */
@@ -389,6 +398,29 @@ namespace NSIntegrator {
 
         /* Destructor -- deallocate temporary arrays */
         ~FluidEvolve() {
+/* Emit the timing call-tree report (only for TIMINGS=true builds;
+               the #else stub must never run, it would pollute the standard
+               output of normal builds).  Note where this actually runs: the
+               tree is global in timing.cpp and the report makes no MPI call,
+               so printing it is legal even though this destructor fires
+               *after* MPI_Finalize (every case main is `do_run(...);
+               MPI_Finalize(); return 0;` with the evolver a main-scope
+               object) -- it is the absence of MPI calls, not the position in
+               the sequence, that makes it safe.  Anything added here must keep
+               that property, and anything that needs to know *which* rank it
+               is takes it from the constructor, not from a query here. */
+#ifdef TIMING_ENABLE
+            if (master()) { timing_stack_report(); }
+#endif
+
+/* Per-rank timing files: deliberately NOT under
+               master(), since every rank writes its own file.  Reads one
+               environment variable and returns when SPINS_TIMING_RANK_FILES is
+               unset, so an ordinary run gains no I/O; and it makes no MPI call,
+               for the reason above. */
+#ifdef TIMING_ENABLE
+            timing_rank_files();
+#endif
             for (set<DTArray *>::iterator i = used_temps.begin(); i != used_temps.end(); i++) { delete *i; }
             for (unsigned int i = 0; i < unused_temps.size(); i++) { delete unused_temps[i]; }
             delete pres_solver;

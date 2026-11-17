@@ -73,6 +73,6 @@ foreach( target ${cases_TARGETS})
     target_link_directories (${target}.x PUBLIC ${base_library_paths})
     target_link_libraries(${target}.x PRIVATE spins_science spins_basecase spins_base)
     target_link_libraries (${target}.x PUBLIC ${MPI_CXX} ${MPI} ${BOOST_PROGRAM_OPTIONS}
-                                              ${UMFPACK} ${LAPACK} ${BLITZ} ${FFTW3}
+                                              ${UMFPACK} ${OPENBLAS} ${BLITZ} ${FFTW3}
     )
 endforeach()

@@ -20,11 +20,13 @@ DEBUG_LDFLAGS=
 
 # Compiler flags for optimization
 OPTIM_CFLAGS="-O3"
-OPTIM_LDFLAGS=$OPTIM_CFLAGS
+# Linker flags only: a $VAR here would be expanded by make (single
+# $), not the shell, so the value must not reference the C-flags vars
+OPTIM_LDFLAGS=
 
 # Compiler flags for extra optimization, such as -ip -ipo on icc
 EXTRA_OPTIM_CFLAGS=
-EXTRA_OPTIM_LDFLAGS=$EXTRA_OPTIM_CFLAGS
+EXTRA_OPTIM_LDFLAGS=
 
 # Library names/locations/flags for MPI-compilation.  This will
 # probably not be necessary on systems with a working mpicc alias

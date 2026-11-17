@@ -21,6 +21,15 @@ extern "C" {
     extern void dgbsv_(int *, int *, int *, int *, double *, int *, int *, double *, int *, int *);
 }
 
+/* The library (gmres_1d_solver.cpp) also defines a global-scope
+   `cheb_d2`/`gridline`; the test-local copies are weak symbols that the
+   library's strong symbols beat at link, so `alloc_resid()` etc. would
+   dispatch to the library's implementations on the test-local object
+   layout (which lacks the library's r_used/b_used members) -> segfault.
+   Rename the test-local types to keep them out of the collision. */
+#define gridline test_gridline
+#define cheb_d2  test_cheb_d2
+
 struct gridline {
     /* Struct to hold together the main vector itself (zline, after the typical
       dimension this will be used with) and an extra double for normalization

@@ -3,6 +3,7 @@
 
 #include <blitz/array.h>
 #include <iostream>
+#include <vector>
 
 #include "umfpack.h"
 #include "timing.hpp"
@@ -20,11 +21,6 @@ using namespace std;
         } \
         MPI_Barrier(my_comm); \
     }
-
-/* Prototype the DGESV LAPACK routine */
-extern "C" {
-    void dgbsv_(int *n, int *kl, int *ku, int *nrhs, double *ab, int *ldab, int *ipiv, double *b, int *ldb, int *info);
-}
 
 void get_fd_operator(Array<double, 1> &x, Array<double, 2> &Dx, Array<double, 2> &Dxx) {
     /* Builds FD derivative operators (to second order, save at boundaries)
@@ -243,8 +239,9 @@ void MG_Solver::set_x_symmetry(SYM_TYPE s) {
 /* Construct local arrays, resizing the blitz::Arrays to their proper size */
 MG_Solver::MG_Solver(Array<double, 1> xvals, blitz::Array<double, 1> zvals, SYM_TYPE sym, MPI_Comm c) :
     coarse_solver(0), coarse_x_lbound(0), coarse_x_ubound(-1), coarse_symbolic_ok(false), coarse_numeric_ok(false), any_dxz(false), bc_tangent(false), bc_normal(false), numeric_factor(0), symbolic_factor(0), sparse_size(0), A_rows(), A_cols(), A_double(), coarsest_level(false), indefinite_problem(false) {
-    my_comm       = c;
-    symmetry_type = sym;
+    my_comm          = c;
+    symmetry_type    = sym;
+    setup_generation = 0; // the band build's generation stamp (see line_band_build)
     MPI_Comm_size(c, &nproc);
     MPI_Comm_rank(c, &myrank);
     /* Get the local sizings, and find out what section of the array we're
@@ -253,6 +250,40 @@ MG_Solver::MG_Solver(Array<double, 1> xvals, blitz::Array<double, 1> zvals, SYM_
     size_z = zvals.extent(firstDim);
     get_local_split(size_x, myrank, nproc, local_x_lbound, local_x_ubound);
     local_size_x = local_x_ubound - local_x_lbound + 1;
+
+    /* The x-lines are handed out in pairs (one red, one black per rank), so a
+       rank count over size_x/2 leaves the last ranks owning no line at all.
+       A rank that owns nothing never runs the red sweep, so the halo Isend its
+       neighbour waits on is never issued, and the first sweep then deadlocks (the
+       same shape measured with a standalone driver: the ill-posed
+       CONSTRUCTION alone is silent but returns 0 -- what deadlocks is
+       in the sweep, and no cheap test runs one).  This check runs at every level,
+       since the coarsening recursion re-enters this constructor, and is inert
+       below the first: only ranks that were handed coarse lines join the coarse
+       communicator, so a level's nproc is never over its own size_x/2.  Here it
+       is a precondition -- state it, and end the run rather than hang.  The test
+       is rank-independent (size_x and nproc are), so every rank reaches it. */
+    if (nproc > size_x / 2) {
+        /* Every rank prints, because MPI_Abort on one of them can take the
+           others down before they write: one line that names the axis, the
+           extent, the rank count and the admissible bound has to survive. */
+        fprintf(stderr, "FATAL: the multigrid solver cannot split %d x-lines over %d ranks: np must be at most size_x/2 = %d -- ending the run.\n", size_x, nproc, size_x / 2);
+        fflush(stderr);
+        MPI_Abort(my_comm, 1);
+    }
+
+    /* The red sweep's lane block: B lanes of band,
+      residual and solution, sized from this level's own line length (z is
+      never coarsened, so this one allocation serves every sweep of every
+      solve this level takes part in).  The vector owns the storage; the batch
+      only points at it, and dies with this object. */
+#ifdef THOMAS_BATCH_SERIAL
+    line_batch_set(line_batch, 0, 0, 0, size_z); // the single-line arm stages nothing
+#else
+    line_batch_block.resize((size_t)line_batch_width(size_z) * 3 * size_z);
+    line_batch_fu.resize((size_t)line_batch_width(size_z) * 2 * size_z);
+    line_batch_set(line_batch, line_batch_block.data(), line_batch_fu.data(), line_batch_width(size_z), size_z);
+#endif
 
     /* Resize and re-index the arrays, so that they point to the local section
       of the global operator space */
@@ -514,8 +545,90 @@ MG_Solver::MG_Solver(Array<double, 1> xvals, blitz::Array<double, 1> zvals, SYM_
 }
 
 /* Line solve */
-#if 1
-void line_solve(Array<double, 1> &u, Array<double, 1> &f, Array<double, 1> &A, Array<double, 1> &B, Array<double, 1> &C, double a0, double a1, double b0, double b1, Array<double, 2> &Dz, Array<double, 2> &Dzz) {
+
+/* Point a band at a caller-owned block of 3*nz doubles. */
+void line_band_set(struct Line_band &band, double *block, int nz) {
+    band.an         = block;
+    band.bn         = block + nz;
+    band.cn         = block + 2 * nz;
+    band.nz         = nz;
+    band.generation = -1; // a band that belongs to no setup yet
+}
+
+/* Point a z-operator at the stencil columns of two (nz,3) arrays. */
+void z_operator_set(Array<double, 2> &Dz, Array<double, 2> &Dzz, struct Z_operator &zop) {
+    /* The columns are taken as &D(0,k) with a common stride between
+      successive z-points, which is what a (nz,3) stencil array laid out with
+      its neighbour index contiguous gives us (and what a caller coming from
+      its own flat array will have too). */
+    assert(Dz.lbound(firstDim) == 0 && Dzz.lbound(firstDim) == 0);
+    assert(Dz.lbound(secondDim) == 0 && Dz.ubound(secondDim) == 2);
+    assert(Dzz.lbound(secondDim) == 0 && Dzz.ubound(secondDim) == 2);
+    assert(Dz.stride(secondDim) == 1 && Dzz.stride(secondDim) == 1);
+    assert(Dz.stride(firstDim) == Dzz.stride(firstDim));
+
+    zop.stride = (int)Dz.stride(firstDim);
+    for (int k = 0; k < 3; k++) {
+        zop.dz[k]  = &Dz(0, k);
+        zop.dzz[k] = &Dzz(0, k);
+    }
+}
+
+/* Build the tridiagonal band of one line solve: the same arithmetic this
+  function has always done,
+      A(z)*Dzz + B(z)*Dz + C                   (the interior rows), and
+      a0*u + b0*Dz*u at z=0,  a1*u + b1*Dz*u at z=top   (the BC rows),
+  hand-written over plain contiguous storage instead of blitz expressions.
+
+  Every entry of the band is written on every call, which is what lets the
+  zero-fills the blitz version led with go away: the three assignments cover
+  the full range and the BC rows overwrite its ends.  The stencil columns are
+  re-read for each line -- they are per-level arrays, not per-level scalars,
+  because on a mapped grid the metric varies with x -- and the coefficients
+  and BC scalars are per-line, so there is nothing here to hoist. */
+void line_band_build(struct Line_band &band, const struct Z_operator &zop, long setup_generation, const double *A, const double *B, const double *C, double a0, double a1, double b0, double b1) {
+    const int top = band.nz - 1;
+    const int s   = zop.stride;
+    double   *an = band.an, *bn = band.bn, *cn = band.cn;
+
+    /* The setup-generation guard: storage that
+      belongs to a different setup carries nothing this build may rely on, so
+      it is re-adopted -- zeroed, then re-stamped -- before anything is
+      written.  Nothing is skipped either way; the zeroing is what keeps that
+      true for a band whose rows are written in more than one pass (an
+      interior loop plus the BC rows), which is how a batched caller will want
+      to use it. */
+    if (band.generation != setup_generation) {
+        for (int i = 0; i < 3 * band.nz; i++) { band.an[i] = 0; }
+        band.generation = setup_generation;
+    }
+
+    /* Set the band matrix based on our input parameters */
+#pragma GCC ivdep
+    for (int i = 0; i <= top; i++) {
+        const int o = s * i;
+        // Subdiagonal
+        an[i] = A[i] * zop.dzz[0][o] + B[i] * zop.dz[0][o];
+        // Main diagonal
+        bn[i] = A[i] * zop.dzz[1][o] + B[i] * zop.dz[1][o] + C[i];
+        // Superdiagonal
+        cn[i] = A[i] * zop.dzz[2][o] + B[i] * zop.dz[2][o];
+    }
+
+    /* BC's */
+
+    /* Bottom -- a0*u+b0*Dz*u */
+    bn[0] = a0 + b0 * zop.dz[1][0]; // Main diagonal from Dz
+    cn[0] = b0 * zop.dz[2][0];      // Superdiagonal from Dz
+    an[0] = 0;
+
+    /* Top -- a1*u + b1*Dz*u */
+    bn[top] = a1 + b1 * zop.dz[1][s * top];
+    an[top] = b1 * zop.dz[0][s * top]; // Subdiagonal from Dz
+    cn[top] = 0;
+}
+
+void line_solve(Array<double, 1> &u, Array<double, 1> &f, Array<double, 1> &A, Array<double, 1> &B, Array<double, 1> &C, double a0, double a1, double b0, double b1, Array<double, 2> &Dz, Array<double, 2> &Dzz, struct Line_band &band, long setup_generation) {
     /* The objective here is to solve the line operator as a tridiangonal banded
       matrix.  While LAPACK has solvers for this, timing suggests that the basic
       banded solver is much slower than expected.  Problems that arise in SPINS
@@ -526,6 +639,7 @@ void line_solve(Array<double, 1> &u, Array<double, 1> &f, Array<double, 1> &A, A
           a1*u + b1*Dz*u = f1 @ z=1 (top) */
 
     timing_push("line_solve");
+    timing_push("line_band"); // the hooks share these lines so that a TIMINGS-off build has the same line count (and so the same assert() line numbers) as one without them
 
     // Build the band matrix itself, re-using the LAPACK formulation
     blitz::firstIndex ii;
@@ -579,74 +693,125 @@ void line_solve(Array<double, 1> &u, Array<double, 1> &f, Array<double, 1> &A, A
 
     timing_pop(); // line_solve
 }
-#else
-void line_solve(Array<double, 1> &u, Array<double, 1> &f, Array<double, 1> &A, Array<double, 1> &B, Array<double, 1> &C, double a0, double a1, double b0, double b1, Array<double, 2> &Dz, Array<double, 2> &Dzz) {
-    /* The objective here is to build the operator as a (tridiagonal) banded
-      matrix for LAPACK, and to solve that using dgbsv (general band solver)
-      to get u from the specified f.  We will be rebuilding the operator
-      at each call (but not reallocating the band matrix) because we're
-      likely to see this called multiple times with different parameters
-      (especially C).  For reference, the problem is:
-         A(z)*Dzz*u+B(z)*Dz*u + C(z)*u = f(z), with
-         a0*u+b0*Dz*u = f0 @ z=0 (bottom), and
-         a1*u+b1*Dz*u = f1 @ z=1 (top)
-   */
-    /* Allocate the operator as static, since it's large-ish */
-    //   cout << "Solving: A: " << A << "B: " << B << "C: " << C << "f: " << f;
-    //   fprintf(stdout,"BCs: %f %f, %f %f\n",a0,a0,b0,b1);
-    timing_push("line_solve");
-    blitz::firstIndex       ii;
-    blitz::secondIndex      jj;
-    static Array<double, 2> band_matrix(4, u.extent(firstDim), blitz::columnMajorArray);
-    band_matrix = 0;
-    int IPIV[u.extent(firstDim)]; // Integer pivots for solve
-    if (band_matrix.extent(secondDim) != u.extent(firstDim)) {
-        // If our size has somehow changed, resize the band matrix to suit
-        band_matrix.resize(4, u.extent(firstDim));
+
+/* Point a block of lanes at caller-owned storage.
+  The lane stride of the band block is 3*nz -- one whole band per lane -- so
+  that a lane's stale-values zeroing can only ever touch its own memory. */
+void line_batch_set(struct Line_batch &batch, double *block, double *fu, int nb_max, int nz) {
+    assert(nb_max >= 0 && nb_max <= THOMAS_BATCH_LANES && nz > 1);
+    assert((nb_max == 0) == (block == 0));
+    batch.block  = block;
+    batch.f      = (nb_max > 0) ? fu : 0;
+    batch.u      = (nb_max > 0) ? fu + (size_t)nb_max * nz : 0;
+    batch.nb_max = nb_max;
+    batch.nz     = nz;
+    for (int b = 0; b < THOMAS_BATCH_LANES; b++) {
+        batch.gen[b] = -1; // a lane that belongs to no setup yet
     }
-    /* Set the band matrix based on our input parameters */
-    // Main diagonal
-    int top                      = band_matrix.ubound(secondDim);
-    band_matrix(2, Range::all()) = A(ii) * Dzz(Range::all(), 1) + B(ii) * Dz(Range::all(), 1) + C(ii);
-    //   // Subdiagonal
-    band_matrix(3, Range(0, top - 1)) = A(Range(1, top)) * Dzz(Range(1, top), 0) + B(ii) * Dz(Range(1, top), 0);
-    //   // Superdiagonal
-    band_matrix(1, Range(1, top)) = A(Range(0, top - 1)) * Dzz(Range(0, top - 1), 2) + B(ii) * Dz(Range(0, top - 1), 2);
-
-    /* BC's */
-    //   band_matrix(Range::all(),0) = 0;
-    //   band_matrix(Range::all(),top) = 0;
-
-    /* Bottom -- a0*u+b0*Dz*u */
-    band_matrix(2, 0)       = a0 + b0 * Dz(0, 1); // Main diagonal from Dz
-    band_matrix(1, 1)       = b0 * Dz(0, 2);      // superdiagonal from Dz
-    band_matrix(2, top)     = a1 + b1 * Dz(top, 1);
-    band_matrix(3, top - 1) = b1 * Dz(top, 0); // Subdiagonal
-
-    /* Parameters for LAPACK call */
-    int N = f.extent(firstDim), KL = 1, KU = 1, NRHS = 1, LDAB = 4, LDB = N, INFO = -1;
-    // dgbsv overwrites f with u, so copy
-    u = f;
-    // LAPACK call
-    //   cout << "Band matrix: " << band_matrix;
-    timing_push("line_solve_lapack");
-    dgbsv_(&N, &KL, &KU, &NRHS, band_matrix.data(), &LDAB, IPIV, u.data(), &LDB, &INFO);
-    //   cout << "Returning u:" << u << "Info " << INFO << endl;
-    if (INFO != 0) {
-        cerr << "Bad line solve, no cookie! (" << INFO << ")\n";
-        cerr << A << B << C;
-        cerr << band_matrix;
-        cerr << f;
-    }
-    timing_pop();
-    assert(INFO == 0);
-    timing_pop();
 }
-#endif
+
+/* Adopt lane `lane`'s band for one build.  The view is per-build and the stamp
+  is the lane's: line_band_set leaves a band that belongs to no setup, and the
+  generation this lane was last built under is what lets line_band_build's
+  stale-values guard skip the zeroing it has nothing to skip. */
+void line_batch_lane(struct Line_batch &batch, int lane, struct Line_band &band) {
+    assert(lane >= 0 && lane < batch.nb_max);
+    line_band_set(band, batch.block + (size_t)lane * 3 * batch.nz, batch.nz);
+    band.generation = batch.gen[lane];
+}
+
+/* The lane width a line of nz points is solved in (see the header).  The
+  curve this reads turns between B=8 and B=16 at nz<=128 and between B=4 and
+  B=8 at nz=256; the halves of that split are where the 5*B*nz doubles of live
+  block stop fitting in L1. */
+int line_batch_width(int nz) {
+    return (nz > 128) ? 4 : THOMAS_BATCH_LANES;
+}
+
+/* Solve a block of staged lines: the Thomas recurrence of line_solve, with the
+  lane loop innermost.  Every lane runs the identical arithmetic in the
+  identical order -- the interleaving is over independent chains, not over the
+  terms of one -- so the lane count changes nothing about what a line's
+  solution is.  The lane loops are marked independent because they are: lanes
+  own disjoint slices of the block, which is the one thing the compiler cannot
+  see for itself here. */
+void line_solve_batch(int nb, struct Line_batch &batch) {
+    const int nz  = batch.nz;
+    const int top = nz - 1;
+
+    assert(nb > 0 && nb <= batch.nb_max);
+    timing_push("line_solve_batch");
+
+    double       *an[THOMAS_BATCH_LANES], *bn[THOMAS_BATCH_LANES], *cn[THOMAS_BATCH_LANES], *u[THOMAS_BATCH_LANES];
+    const double *f[THOMAS_BATCH_LANES];
+#pragma GCC ivdep
+    for (int b = 0; b < nb; b++) {
+        double *blk = batch.block + (size_t)b * 3 * nz;
+        an[b]       = blk;
+        bn[b]       = blk + nz;
+        cn[b]       = blk + 2 * nz;
+        f[b]        = batch.f + (size_t)b * nz;
+        u[b]        = batch.u + (size_t)b * nz;
+    }
+
+    // Thomas algorithm, via Wikipedia, note base-zero indexing
+#pragma GCC ivdep
+    for (int b = 0; b < nb; b++) {
+        cn[b][0] = cn[b][0] / bn[b][0];
+        u[b][0]  = f[b][0] / bn[b][0]; // Use u for d', which will be overwritten by the final sol'n
+    }
+
+    for (int i = 1; i < top; i++) {
+#pragma GCC ivdep
+        for (int b = 0; b < nb; b++) {
+            cn[b][i] = cn[b][i] / (bn[b][i] - an[b][i] * cn[b][i - 1]);
+            u[b][i]  = (f[b][i] - an[b][i] * u[b][i - 1]) / (bn[b][i] - an[b][i] * cn[b][i - 1]);
+        }
+    }
+
+#pragma GCC ivdep
+    for (int b = 0; b < nb; b++) { u[b][top] = (f[b][top] - an[b][top] * u[b][top - 1]) / (bn[b][top] - an[b][top] * cn[b][top - 1]); }
+
+    // Back substitution
+    for (int i = top - 1; i >= 0; i--) {
+#pragma GCC ivdep
+        for (int b = 0; b < nb; b++) { u[b][i] = u[b][i] - cn[b][i] * u[b][i + 1]; }
+    }
+
+    timing_pop(); // line_solve_batch
+}
+
+/* Solve the nb lines staged in this level's lanes and copy them back into
+  u itself.  The lanes are written back in the order they
+  were staged in, which is also where the left-boundary exchange goes: the red
+  loop stages lines in increasing i, so the block that starts on
+  local_x_lbound is the first one, and the copy below has put that line in u
+  before the send reads it. */
+void MG_Solver::line_batch_flush(Array<double, 2> &u, int nb, int left_neighbour, MPI_Request &send_request_left) {
+    assert(nb > 0 && nb <= line_batch.nb_max);
+
+    line_solve_batch(nb, line_batch);
+
+    for (int b = 0; b < nb; b++) {
+        const int     i  = line_batch.ix[b];
+        const double *ub = line_batch.u + (size_t)b * line_batch.nz;
+#pragma GCC ivdep
+        for (int j = 0; j < size_z; j++) { u(i, j) = ub[j]; }
+    }
+
+    /* If the block we've just written back includes the local lbound, we want
+      to send it to the left neighbour */
+    if (line_batch.ix[0] == local_x_lbound) {
+        timing_push("redblack_mpi");
+        MPI_Isend(&u(local_x_lbound, 0), size_z, MPI_DOUBLE, left_neighbour, 0, my_comm, &send_request_left);
+        timing_pop();
+    }
+}
 
 /* Copy coefficients to the local object, and coarsen for the subproblem */
 void MG_Solver::problem_setup(Array<double, 2> &Uxx, Array<double, 2> &Uzz, Array<double, 2> &Uxz, Array<double, 2> &Ux, Array<double, 2> &Uz) {
     coarse_numeric_ok = false;
+    setup_generation++;
     rebalance_array(Uxx, uxx, my_comm, FFine); // uxx/etc are sized as per the local, internal grid;
     rebalance_array(Uzz, uzz, my_comm, FFine); // from an array-size point of view this looks
     rebalance_array(Ux, ux, my_comm, FFine);   // equivalent to the balancing of input-f
@@ -701,7 +866,8 @@ void MG_Solver::problem_setup(Array<double, 2> &Uxx, Array<double, 2> &Uzz, Arra
 
 void MG_Solver::helmholtz_setup(double h) {
     coarse_numeric_ok = false;
-    helm_parameter    = h;
+    setup_generation++;
+    helm_parameter = h;
     if (coarsest_level) check_bc_consistency();
     if (coarse_solver) coarse_solver->helmholtz_setup(h);
 }
@@ -710,6 +876,7 @@ void MG_Solver::bc_setup(int dim, Array<double, 1> u_min, Array<double, 1> uz_mi
     /* Copy BC data to the local object, and punt down the chain for a
       cosarse problem */
     coarse_numeric_ok = false;
+    setup_generation++;
     //   MPI_Finalize(); exit(1);
     if (dim == 0) {
         // x -- no balancing needed
@@ -951,6 +1118,14 @@ void MG_Solver::do_redblack(blitz::Array<double, 2> &f, blitz::Array<double, 2> 
         uz_coef(size_z),               // ux_term
         uzz_coef(size_z), f_line(size_z), u_line(size_z);
     double bc_bot, bc_z_bot, bc_top, bc_z_top;
+    /* One tridiagonal band for this sweep, rebuilt for every line in it and
+      released when the sweep ends: nothing about a band survives this call.
+      The vector owns the block -- which matters, since
+      this function has one irregular return -- and line_band_set only points
+      at it. */
+    std::vector<double> band_block(3 * size_z);
+    struct Line_band    band;
+    line_band_set(band, band_block.data(), size_z);
     ul_right = -999;
 
     // MPI_Request objects for sending and receiving, for nonblocking
@@ -991,6 +1166,21 @@ void MG_Solver::do_redblack(blitz::Array<double, 2> &f, blitz::Array<double, 2> 
     timing_pop();
 
     /* Solve the red lines */
+#ifndef THOMAS_BATCH_SERIAL
+    /* The batched arm.  The interior lines of this
+      colour are independent Jacobi solves of one length, so they are staged
+      into a block of line_batch.nb_max lanes and solved by one interleaved
+      recurrence, which keeps that many Thomas chains in flight where the
+      single-line call keeps exactly one.  A lane's band is built here, per
+      line, from the coefficients just assembled (the metric varies with x, so
+      the build itself has nothing to hoist), and the z-operator view is hoisted
+      out of the line loop because this arm builds bands out here rather than
+      inside line_solve.  The boundary and SYM_* branches, the whole black sweep
+      and the odd-ubound line keep the single-line call below. */
+    struct Z_operator zop;
+    z_operator_set(Dz, Dzz, zop);
+    int nb = 0;
+#endif
     for (int i = local_x_lbound; i <= local_x_ubound; i += 2) {
         // Coefficients for boudary conditions
         //      fprintf(stderr,"Solving line %d\n",i);
@@ -1105,12 +1295,37 @@ void MG_Solver::do_redblack(blitz::Array<double, 2> &f, blitz::Array<double, 2> 
             abort();
         }
 
+#ifndef THOMAS_BATCH_SERIAL
+        /* Stage this line into the next lane of the block, if it is one the
+          batched path takes: a strictly interior line, whose coefficients came
+          out of the interior branch above.  The block is flushed as soon as it
+          is full, so a lane block is never wider than the measured curve
+          supports however long the colour is. */
+        if (line_batch.nb_max > 0 && i != 0 && i != size_x - 1) {
+            struct Line_band lane;
+            timing_push("line_solve_batch");
+            line_batch_lane(line_batch, nb, lane);
+            line_band_build(lane, zop, setup_generation, uzz_coef.data(), uz_coef.data(), u_coef.data(), bc_bot, bc_top, bc_z_bot, bc_z_top);
+            line_batch.gen[nb] = setup_generation; // the lane now holds this setup
+            double *f_lane     = line_batch.f + (size_t)nb * size_z;
+    #pragma GCC ivdep
+            for (int j = 0; j < size_z; j++) { f_lane[j] = f(i, j); } // Copy the residual into the lane
+            timing_pop();                                             // line_solve_batch
+            line_batch.ix[nb] = i;
+            if (++nb == line_batch.nb_max) {
+                line_batch_flush(u, nb, left_neighbour, send_req);
+                nb = 0;
+            }
+            continue;
+        }
+#endif
+
         f_line = f(i, Range::all()); // Copy the residual
                                      //      if (i==4) {cerr << f_line; cerr.flush();}
 
         // Solve the line
         //      fprintf(stderr,"Line (R) %d/%d\n",i,local_x_ubound);
-        line_solve(u_line, f_line, uzz_coef, uz_coef, u_coef, bc_bot, bc_top, bc_z_bot, bc_z_top, Dz, Dzz);
+        line_solve(u_line, f_line, uzz_coef, uz_coef, u_coef, bc_bot, bc_top, bc_z_bot, bc_z_top, Dz, Dzz, band, setup_generation);
         //      if (i==4) {fprintf(stderr,"Line4(R):\n");cerr << u_line; cerr.flush();}
         //      cerr << u_line;
 
@@ -1126,6 +1341,14 @@ void MG_Solver::do_redblack(blitz::Array<double, 2> &f, blitz::Array<double, 2> 
         }
         timing_pop();
     }
+#ifndef THOMAS_BATCH_SERIAL
+    /* The last partial block.  Every red line has to be back in u before the
+      black sweep starts reading its neighbours, and the send of the local
+      lbound rides along with whichever block carried it. */
+    if (nb > 0) line_batch_flush(u, nb, left_neighbour, send_req);
+    nb = 0; // the black sweep below stages into the same lanes
+#endif
+
     // Now, black points, treating the last line specially
     for (int i = local_x_lbound + 1; i <= local_x_ubound - 1; i += 2) {
         // Coefficients for boudary conditions
@@ -1167,13 +1390,48 @@ void MG_Solver::do_redblack(blitz::Array<double, 2> &f, blitz::Array<double, 2> 
         f_line(size_z - 1) = f_line(size_z - 1) - ux_top(i) * (Dx(i, 0) * u(i - 1, size_z - 1) + Dx(i, 2) * u(i + 1, size_z - 1));
         //      if (i==3) cerr << f_line;
 
+#ifndef THOMAS_BATCH_SERIAL
+        /* Stage this line into the next lane of the block.
+          Every line of this sweep is interior -- the loop runs from
+          local_x_lbound + 1 to local_x_ubound - 1 -- and its residual is final
+          the moment the neighbour corrections above have been applied: the
+          neighbours it reads are red, all written back by the flush above,
+          and black lines never neighbour each other, so no later line of this
+          sweep reads u(i) before its block is flushed.  The z-operator view
+          and the lane counter are the red sweep's, hoisted above it. */
+        if (line_batch.nb_max > 0) {
+            struct Line_band lane;
+            timing_push("line_solve_batch");
+            line_batch_lane(line_batch, nb, lane);
+            line_band_build(lane, zop, setup_generation, uzz_coef.data(), uz_coef.data(), u_coef.data(), bc_bot, bc_top, bc_z_bot, bc_z_top);
+            line_batch.gen[nb] = setup_generation; // the lane now holds this setup
+            double *f_lane     = line_batch.f + (size_t)nb * size_z;
+    #pragma GCC ivdep
+            for (int j = 0; j < size_z; j++) { f_lane[j] = f_line(j); } // Copy the corrected residual into the lane
+            timing_pop();                                               // line_solve_batch
+            line_batch.ix[nb] = i;
+            if (++nb == line_batch.nb_max) {
+                line_batch_flush(u, nb, left_neighbour, send_req);
+                nb = 0;
+            }
+            continue;
+        }
+#endif
+
         // Solve the line
         //      fprintf(stdout,"Line (B) %d/%d\n",i,local_x_ubound);
-        line_solve(u_line, f_line, uzz_coef, uz_coef, u_coef, bc_bot, bc_top, bc_z_bot, bc_z_top, Dz, Dzz);
+        line_solve(u_line, f_line, uzz_coef, uz_coef, u_coef, bc_bot, bc_top, bc_z_bot, bc_z_top, Dz, Dzz, band, setup_generation);
 
         // Copy back into u
         u(i, Range::all()) = u_line;
     }
+#ifndef THOMAS_BATCH_SERIAL
+    /* The last partial black block.  Nothing before the odd-ubound line (or
+      the even-ubound return) reads a black line, but everything after this
+      sweep does, so the lanes must be empty here; as above, the lbound send
+      inside the flush is dead for this colour (ix[0] > local_x_lbound). */
+    if (nb > 0) line_batch_flush(u, nb, left_neighbour, send_req);
+#endif
     // finally, the local right-hand-point
 
     /* Make sure we've received the upper bound by now */
@@ -1280,7 +1538,7 @@ void MG_Solver::do_redblack(blitz::Array<double, 2> &f, blitz::Array<double, 2> 
     // Solve the line
     //   cerr << uzz_coef << uz_coef << u_coef;
 
-    line_solve(u_line, f_line, uzz_coef, uz_coef, u_coef, bc_bot, bc_top, bc_z_bot, bc_z_top, Dz, Dzz);
+    line_solve(u_line, f_line, uzz_coef, uz_coef, u_coef, bc_bot, bc_top, bc_z_bot, bc_z_top, Dz, Dzz, band, setup_generation);
     //      if (i==3) cerr << u_line;
 
     // Copy back into u
@@ -1450,6 +1708,7 @@ void MG_Solver::coarsen_grid(blitz::Array<double, 2> &q, bool even) {
       the "boundray" is a phantom point, with its value being 0 (odd), nearest-
       neighbour (even), or 0.5*(nearest_neighbour+opposite_neighbour) (periodic).
       This affects the weights of the above formula. */
+    timing_push("mg_coarsen");
     Array<double, 1> q_left(size_z), q_right(size_z); // Neighbours
     Range            all = Range::all();
     q_left               = -999;
@@ -1590,9 +1849,11 @@ void MG_Solver::coarsen_grid(blitz::Array<double, 2> &q, bool even) {
     //      if (myrank == i) cout << local_coarse_2d;
     //      MPI_Barrier(my_comm);
     //   }
+    timing_pop(); // mg_coarsen
 }
 
 void MG_Solver::interpolate_grid(Array<double, 2> &q) {
+    timing_push("mg_interpolate");
     q                    = -999;
     Range            all = Range::all();
     Array<double, 1> qc_left(size_z), qc_right(size_z);
@@ -1740,6 +2001,7 @@ void MG_Solver::interpolate_grid(Array<double, 2> &q) {
     //      if (i == myrank) cout << q;
     //      MPI_Barrier(my_comm);
     //   }
+    timing_pop(); // mg_interpolate
 }
 
 void MG_Solver::cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &u, double extra_in, double &extra_out, int pre, int mid, int post) {
@@ -1781,8 +2043,10 @@ void MG_Solver::cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &u
 void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &u, double extra_in, double &extra_out, int pre, int mid, int post) {
     /* Perform a single #-cycle on the problem, with f as the residual RHS-vector */
 
+    timing_push("mg_defect_correction");
     /* This allocation should be made only once. FIXME. */
     Array<double, 2> defect(f.lbound(), f.extent()), correction(u.lbound(), u.extent());
+    timing_pop(); // mg_defect_correction
     //fprintf(stderr,"_cycle: mean condition %g\n",extra_in);
     //   if (master()) fprintf(stderr,"Call to _cycle[%d]\n",size_x);
     //timing_push("_cycle");
@@ -1800,6 +2064,11 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
 #if 1
         int    sys = UMFPACK_At;
         double Control[UMFPACK_CONTROL], Info[UMFPACK_INFO];
+        /* UMFPACK reads Control literally (it substitutes its own default only
+           where an entry is NaN), so this vector has to be initialized before
+           it is passed -- see the factorization site below for the same
+           declare/defaults/call order. */
+        umfpack_di_defaults(Control);
         //fprintf(stderr,"Coarse solve:\n");
         //cerr << f;
         double *u_ptr, *f_ptr;
@@ -1835,7 +2104,10 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
             timing_push("coarse solve");
             int retval = umfpack_di_solve(sys, A_cols, A_rows, A_double, u_ptr, f_ptr, numeric_factor, Control, Info);
             timing_pop();
-            assert(!retval);
+            if (retval) {
+                fprintf(stderr, "FATAL: umfpack_di_solve failed on the coarse grid (status %d): the multigrid coarse solve produced no solution -- ending the run.\n", retval);
+                exit(1);
+            }
             if (indefinite_problem) {
                 //            fprintf(stderr,"CG: True u\n");
                 //            cerr << extra_u << endl;
@@ -1873,8 +2145,10 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
         //cout << "New correction: " << correction;
         /* And apply the operator to find the defect */
         apply_operator(correction, defect);
+        timing_push("mg_defect_correction");
         defect = -(defect - f);
         u      = correction;
+        timing_pop(); // mg_defect_correction
         /* Perform a second relaxation pass */
         //   fprintf(stderr,"Pre-cycle two\n");
         //      if (master()) fprintf(stderr,"RB precycle %d complete\n",0);
@@ -1883,8 +2157,10 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
         //      if (master()) fprintf(stderr,"Defect:\n");
         //      SYNC(cerr << defect; cerr.flush());
     } else {
+        timing_push("mg_defect_correction");
         defect = f;
         u      = 0;
+        timing_pop(); // mg_defect_correction
     }
     for (int i = 1; i < pre; i++) {
         //      if (master()) fprintf(stderr,"Doing RB precycle %d\n",i);
@@ -1895,8 +2171,10 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
         apply_operator(correction, f);
         //      if (master()) fprintf(stderr,"f:\n");
         //      SYNC(cerr << f; cerr.flush());
+        timing_push("mg_defect_correction");
         u      = u + correction;
         defect = defect - f;
+        timing_pop(); // mg_defect_correction
         //      if (master()) fprintf(stderr,"U:\n");
         //      SYNC(cerr << u; cerr.flush());
         //      if (master()) fprintf(stderr,"Defect:\n");
@@ -1944,9 +2222,11 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
                 double now = MPI_Wtime();
                 apply_operator(correction, f);
             }
+            timing_push("mg_defect_correction");
             defect    = defect - f - coarse_extra_out;
             u         = u + correction;
             extra_out = coarse_extra_out;
+            timing_pop(); // mg_defect_correction
             //         if (master()) fprintf(stderr,"V[%d] cycle return \n",size_x);
             break;
         case CYCLE_F:
@@ -1990,8 +2270,10 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
                 do_redblack(defect, correction);
                 //      cout << "New correction: " << correction;
                 apply_operator(correction, f);
+                timing_push("mg_defect_correction");
                 defect = defect - f;
                 u      = u + correction;
+                timing_pop(); // mg_defect_correction
             }
             //         if (1||indefinite_problem) {
             //            /* extra_in will change, since part of the mean will already be accounted for */
@@ -2018,10 +2300,12 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
                 double now = MPI_Wtime();
                 apply_operator(correction, f);
             }
+            timing_push("mg_defect_correction");
             defect = defect - f - coarse_extra_out;
             u      = u + correction;
             //         fprintf(stderr,"F(2)[%d] average: %g vs %g\n",size_x,pvsum(u,my_comm)/(size_x*size_z),extra_in);
             extra_out += coarse_extra_out;
+            timing_pop(); // mg_defect_correction
             //         if (master()) fprintf(stderr,"F[%d] cycle return\n",size_x);
             break;
 
@@ -2038,8 +2322,10 @@ void MG_Solver::_cycle(CYCLE_TYPE cycle, Array<double, 2> &f, Array<double, 2> &
         do_redblack(defect, correction);
         //      cout << "New correction: " << correction;
         apply_operator(correction, f);
+        timing_push("mg_defect_correction");
         defect = defect - f;
         u      = u + correction;
+        timing_pop(); // mg_defect_correction
     }
     //  SYNC(cerr << myrank << ": " << u(u.ubound(firstDim),0) << endl;cerr.flush();)
 

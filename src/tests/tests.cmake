@@ -11,6 +11,7 @@ set (tests_TARGETS
 #  test_min_ns  # -- Broken.
   test_ode   
   test_poisson1d
+  test_precond_conv
 #  test_par  # -- Broken.
 #  test_pesolve  # -- Broken.
 #  test_pheat  # -- Broken.
@@ -29,6 +30,6 @@ foreach( target ${tests_TARGETS})
     target_link_directories (${target}.x PUBLIC ${base_library_paths})
     target_link_libraries(${target}.x PRIVATE spins_base spins_science spins_basecase)
     target_link_libraries (${target}.x PUBLIC ${MPI_CXX} ${MPI} ${BOOST_PROGRAM_OPTIONS}
-                                              ${UMFPACK} ${LAPACK} ${BLITZ} ${FFTW3}
+                                              ${UMFPACK} ${OPENBLAS} ${BLITZ} ${FFTW3}
     )
 endforeach()

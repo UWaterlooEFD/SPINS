@@ -8,12 +8,13 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fPIC")
 set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O2")
 set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -g -O0 -DBZ_DEBUG")
 
-set (MPI_ROOT "/usr/lib/x86_64-linux-gnu/openmpi/")
-set (BLITZ_ROOT "/usr/local")
-set (SUITESPARSE_INCLUDE_ROOT "/usr/include/suitesparse/")
+set (MPI_PREFIX "/usr/lib/x86_64-linux-gnu/openmpi" CACHE STRING "PATH of MPI installation directory")
+set (BLITZ_PREFIX "/usr/local" CACHE STRING "PATH of blitz++ installation directory")
+set (SUITESPARSE_INCLUDE_DIR "/usr/include/suitesparse" CACHE STRING "PATH to suitesparse development headers, e.g., /usr/include/suitesparse")
+set (FFTW3_LIB_PATH "/usr/lib/x86_64-linux-gnu" CACHE STRING "PATH containg FFTW3 library (.so, .a) files. Defaults to: /usr/lib/x86_64-linux-gnu")
 
-set (base_include_paths "${MPI_ROOT}/include" "${BLITZ_ROOT}" "${SUITESPARSE_INCLUDE_ROOT}")
-set (base_library_paths "${MPI_ROOT}/lib ${BLITZ_ROOT}/lib")
+set (base_include_paths "${MPI_PREFIX}/include" "${BLITZ_PREFIX}" "${SUITESPARSE_INCLUDE_DIR}")
+set (base_library_paths "${MPI_PREFIX}/lib ${BLITZ_PREFIX}/lib")
 
 # Hacky method of extracting the contents of the src/VERSION file into variables.
 execute_process(COMMAND bash -c ". ${CMAKE_CURRENT_SOURCE_DIR}/src/VERSION && echo -n $MAJOR_VERSION" OUTPUT_VARIABLE MAJOR_VERSION)
@@ -26,18 +27,18 @@ message("-- MINOR VERSION: ${MINOR_VERSION}")
 message("-- PATCH VERSION: ${PATCH_VERSION}")
 
 # Resolve dependency locations.
-find_library(BLITZ NAMES "blitz" PATHS "${BLITZ_ROOT}/lib" "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
+find_library(BLITZ NAMES "blitz" PATHS "${BLITZ_PREFIX}/lib" "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
 find_library(BOOST_PROGRAM_OPTIONS NAMES "boost_program_options" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
-find_library(FFTW3 NAMES "fftw3" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
-find_library(LAPACK NAMES "lapack" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
-find_library(MPI NAMES "mpi" PATHS "${MPI_ROOT}/lib" "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
+find_library(FFTW3 NAMES "fftw3" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64" "${FFTW3_LIB_PATH}")
+find_library(OPENBLAS NAMES "openblas" "openblasp" "openblaso" "OPENBLAS" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
+find_library(MPI NAMES "mpi" PATHS "${MPI_PREFIX}/lib" "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
 find_library(MPI_CXX NAMES "mpi_cxx" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
 find_library(UMFPACK NAMES "umfpack" PATHS "/usr/lib" "/usr/local/lib" "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/lib64")
 
 message("-- Found ${BLITZ}")
 message("-- Found ${BOOST_PROGRAM_OPTIONS}")
 message("-- Found ${FFTW3}")
-message("-- Found ${LAPACK}")
+message("-- Found ${OPENBLAS}")
 message("-- Found ${MPI}")
 message("-- Found ${MPI_CXX}")
 message("-- Found ${MPI}")
@@ -87,7 +88,7 @@ target_include_directories (nonhydro_sw.x PUBLIC ${base_include_paths})
 target_compile_definitions (nonhydro_sw.x PUBLIC MAJOR_VERSION=${MAJOR_VERSION} MINOR_VERSION=${MINOR_VERSION} PATCH_VERSION=${PATCH_VERSION})
 target_link_libraries(nonhydro_sw.x PRIVATE spins_base)
 target_link_libraries(nonhydro_sw.x PUBLIC ${MPI_CXX} ${MPI} ${BOOST_PROGRAM_OPTIONS}
-${UMFPACK} ${LAPACK} ${BLITZ} ${FFTW3})
+${UMFPACK} ${OPENBLAS} ${BLITZ} ${FFTW3})
 
 
 # Include test cases (some seem to be broken, incompatible with the current SPINS API.)

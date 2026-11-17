@@ -194,6 +194,6 @@ void parse_datatype(const string datatype, input_types &input_data_type);
 // parse expansion types
 void parse_boundary_conditions(const string xgrid_type, const string ygrid_type, const string zgrid_type, DIMTYPE &intype_x, DIMTYPE &intype_y, DIMTYPE &intype_z);
 
-extern template class FluidEvolve<BaseCase>;
+extern template class NSIntegrator::FluidEvolve<BaseCase>;
 typedef FluidEvolve<BaseCase> EasyFlow; // Explicit template instantiation
 #endif

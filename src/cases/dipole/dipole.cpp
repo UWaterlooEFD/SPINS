@@ -399,6 +399,12 @@ int main(int argc, char **argv) {
     // Parse the options from the command line and config file
     options_parse(argc, argv);
 
+    /* Refuse an ill-posed rank count here, at the first point that knows both
+       the grid and the communicator, rather than deadlocking in the first
+       timestep (check_np_for_grid, src/Splits.cpp).  Inert at any admissible
+       np: it prints nothing and does no communication. */
+    check_np_for_grid(Nx, Nz, MPI_COMM_WORLD);
+
     /* ------------------ Adjust and check parameters --------------------- */
     /* Now, make sense of the options received.  Many of these
      * can be directly used, but the ones of string-type need further procesing. */

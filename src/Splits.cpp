@@ -29,6 +29,61 @@ vector<int> get_lbounds(int size, int numprocs) {
     return lbounds;
 }
 
+void check_np_for_grid(int size_x, int size_z, MPI_Comm comm) {
+    /* Is this rank count admissible for a grid of this size?  Both bounds are
+       evaluated so that an ill-posed setup hears about all of them, and every
+       rank evaluates them from values it holds (an extent and a communicator
+       size are rank-independent), so no rank can be further along than its
+       neighbours when they abort together.  Both bounds are measured on this
+       model's own split:
+
+       (1) numprocs <= min(size_x,size_z).  get_extents above hands out
+           size/numprocs + (i < size%numprocs), so a rank count over an axis
+           leaves some rank owning nothing along it: Nx=64 Nz=16 np=32 aborts
+           one rank, Nx=8 Nz=16 np=9 segfaults one.  A rank that owns nothing
+           along the axis it is being asked to transform also has no lines to
+           transform, which is the num_transforms >= 1 precondition
+           Plan_holder.hpp's check_num_transforms enforces at the plan site --
+           a consequence of this bound rather than a third one, so it is named
+           here.
+       (2) numprocs <= size_x/2.  The threshold of the failure that actually
+           bites: at Nx=64 Nz=64 np=33 the run deadlocks in its first timestep
+           with some ranks inside the Sendrecv ring of Transposer::transpose
+           below and the rest inside an Allreduce in the case's analysis -- two
+           groups waiting on different collectives on one communicator -- while
+           np=32 runs (Nx=8 Nz=16: np=4 runs, np=5 hangs).  This is the bound
+           MG_Solver's constructor states, in the same words (multigrid.cpp,
+           "np must be at most size_x/2"), where it comes from handing x-lines
+           out in pairs; the transform layer reaches the same threshold for its
+           own reasons, which are not traced here.  Both sites test the same
+           expression so they cannot disagree, and both stay: that constructor
+           is re-entered by the coarsening recursion, where this startup check
+           has only ever seen the fine grid.
+
+       An admissible rank count prints nothing and communicates nothing.  A
+       rank-local exit is not enough for an inadmissible one: measured with a
+       standalone driver, an aborting neighbour tore the job down before the
+       reporting rank wrote, and the message was lost with it -- hence every rank
+       prints its own line before the whole communicator aborts together. */
+    int numprocs, myrank;
+    MPI_Comm_size(comm, &numprocs);
+    MPI_Comm_rank(comm, &myrank);
+
+    bool bad = false;
+    if (numprocs > min(size_x, size_z)) {
+        fprintf(stderr, "FATAL: %d ranks cannot split a %d x %d grid: np must be at most min(Nx,Nz) = %d -- some rank would own no part of the array it is split over, and so has no lines to transform -- ending the run.\n", numprocs, size_x, size_z, min(size_x, size_z));
+        bad = true;
+    }
+    if (numprocs > size_x / 2) {
+        fprintf(stderr, "FATAL: %d ranks cannot split %d x-lines: np must be at most size_x/2 = %d -- the ranks left without a line take a different collective than the ranks that have one, and the first timestep deadlocks -- ending the run.\n", numprocs, size_x, size_x / 2);
+        bad = true;
+    }
+    if (bad) {
+        fflush(stderr);
+        MPI_Abort(comm, 1);
+    }
+}
+
 template <class T>
 Transposer<T>::Transposer(int szx, int szy, int szz, int from_dim, int to_dim, MPI_Comm c, MPI_Datatype t) : src_temp(0), dst_temp(0), issue_warning(true) {
     comm      = c;
